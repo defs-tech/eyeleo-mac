@@ -775,9 +775,11 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
     _countdownTime = time;
 
     EBOverlayWindow *window = [self windowWithView:view onDisplay:display capturesInput:NO];
-    // The bubble sits in the bottom-right corner, as on Windows.
-    NSRect screen = EBDisplay(display).frame;
-    [window setFrameOrigin:NSMakePoint(NSMaxX(screen) - bubble.size.width, NSMinY(screen))];
+    // The bubble sits in the bottom-right corner, as on Windows -- but inside the work area. Against
+    // the full display frame it started at y=0, which is where the Dock is: on this machine 60 of the
+    // bubble's 71 points sat under the Dock and only the top sliver was visible. A break countdown
+    // is the one thing that must never be half hidden.
+    [window setFrame:EBBottomRightRect(bubble.size, EBDisplay(display).visibleFrame, 0) display:NO];
     window.alphaValue = 1;
     _countdownWnd = window;
     [window orderFrontRegardless];
