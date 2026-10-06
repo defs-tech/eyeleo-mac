@@ -1,0 +1,18 @@
+# Build output: the whole app bundle, the test binaries and the diagnostic tools land here.
+# Everything is reproducible from source with `make`.
+build/
+
+# Probe output and the pid of the run that produced it. The probe source itself
+# (spike/probe.m) is tracked; its output is not.
+spike/out.txt
+spike/pid
+spike/probe.app/
+
+# Finder noise on a macOS box.
+.DS_Store
+
+# Editor and merge leftovers.
+*.swp
+*~
+*.orig
+*.rej
