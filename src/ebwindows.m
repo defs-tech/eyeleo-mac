@@ -169,6 +169,9 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
 @property(nonatomic, strong, nullable) EBOverlayWindow *countdownWnd;
 @property(nonatomic, strong, nullable) EBOverlayWindow *notificationWindow;
 @property(nonatomic, strong, nullable) EBOverlayWindow *waterWnd;
+@property(nonatomic, strong, nullable) NSImageView *longArt;
+@property(nonatomic, strong, nullable) NSTextField *waterTime;
+@property(nonatomic) long waterMsLeft;
 
 @property(nonatomic, strong, nullable) NSTextField *longClock;
 @property(nonatomic, strong, nullable) NSImageView *shortImage;
@@ -196,6 +199,7 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
 @property(nonatomic, strong, nullable) NSRunningApplication *suspendedApplication;
 
 @property(nonatomic) long longBreakMsLeft;
+@property(nonatomic) int longSwayPhase;
 @property(nonatomic) long shortBreakMsLeft;
 @property(nonatomic) long countdownMsLeft;
 @property(nonatomic) int beforeReadySeconds;
@@ -203,6 +207,7 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
 
 - (void)fastTick;
 - (void)slowTick;
+- (void)stepLongBreakSway;
 - (void)startFastTimer;
 - (void)startSlowTimer;
 - (void)stopFastTimer;
@@ -520,6 +525,18 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
         }
     }
 
+    if (self.longArt)
+        [self stepLongBreakSway];
+
+    if (self.waterTime) {
+        self.waterMsLeft -= 1000;
+        if (self.waterMsLeft <= 0) {
+            [self hideWaterReminder];
+        } else {
+            self.waterTime.stringValue = EBTimeLeftText(self.waterMsLeft, EBRussianNow(), NO);
+        }
+    }
+
     if (self.longClock) {
         self.longBreakMsLeft -= 1000;
         self.longClock.stringValue =
@@ -542,11 +559,25 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
                                             self.beforeReadySeconds];
     }
 
-    if (!self.countdownTime && !self.longClock && !self.beforeReadyButton)
+    if (!self.countdownTime && !self.longClock && !self.beforeReadyButton && !self.waterTime)
         [self stopSlowTimer];
 }
 
 #pragma mark - Long break
+
+// A slow alternating lean, the way someone rolls their shoulders during a long break. Six seconds to
+// each side is far slower than the short break's motion on purpose: this runs for minutes, not
+// seconds, and anything quicker reads as a twitch. The anchor point is the bottom of the frame so the
+// figure leans from the hips instead of pivoting around its own middle.
+- (void)stepLongBreakSway {
+    static const double kLean[4] = { 0.0, 1.0, 0.0, -1.0 };
+    self.longSwayPhase = (self.longSwayPhase + 1) % 4;
+    double lean = kLean[self.longSwayPhase];
+    float radians = (float)(lean * 0.045);
+    self.longArt.layer.transform = CATransform3DMakeRotation(radians, 0, 0, 1);
+    if (EBTraceOn())
+        fprintf(stderr, "[EB] long break lean %.3f rad\n", radians);
+}
 
 - (void)showLongBreakWithSeconds:(int)seconds {
     [self hideLongBreakAnimated:NO];
@@ -577,15 +608,26 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
                 [view addSubview:title];
             }
 
-            NSImage *leopard = [EBAssets.shared personage:EBFrameDefault];
+            // The bust rather than the bare head: the long break was the one screen with no motion at
+            // all, and a five minute break justifies showing shoulders. Generating a full-body figure
+            // was attempted and produced an unusable quadruped, so the same baked bust as the neck
+            // exercise is reused and moved in code -- one image, so the markings cannot drift.
+            NSImage *leopard = [EBAssets.shared personage:EBFrameShoulders];
+            if (!leopard)
+                leopard = [EBAssets.shared personage:EBFrameDefault];
             if (leopard) {
+                CGFloat artH = leopard.size.height * 1.6;
+                CGFloat artW = leopard.size.width * 1.6;
                 NSImageView *portrait =
-                    [[NSImageView alloc] initWithFrame:NSMakeRect(centreX - leopard.size.width / 2.0,
-                                                                  cursorY - leopard.size.height, leopard.size.width,
-                                                                  leopard.size.height)];
+                    [[NSImageView alloc] initWithFrame:NSMakeRect(centreX - artW / 2.0,
+                                                                  cursorY - artH, artW, artH)];
                 portrait.image = leopard;
+                portrait.wantsLayer = YES;
+                // Pivot at the bottom of the frame, so the figure leans rather than spinning in place.
+                portrait.layer.anchorPoint = CGPointMake(0.5, 0.0);
                 [view addSubview:portrait];
-                cursorY -= leopard.size.height + 20;
+                self.longArt = portrait;
+                cursorY -= artH + 20;
             }
 
             static NSString *const tips[3] = { @"big_pause_text_1", @"big_pause_text_2", @"big_pause_text_3" };
@@ -632,6 +674,8 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
     [self restoreSuspendedApplication];
     _longClock = nil;
     _longBreakMsLeft = 0;
+    _longArt = nil;
+    _longSwayPhase = 0;
     if (animated && (_longBreakWnds.count || _longBreakDimWnds.count)) {
         [self fadeOut:_longBreakDimWnds];
         [self fadeOut:_longBreakWnds];
@@ -1028,6 +1072,10 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
                               NSTextAlignmentCenter, YES);
     time.frame = NSMakeRect(textLeft, bubble.size.height / 2.0 - 28, textWidth, 20);
     [view addSubview:time];
+    // The number counts down on the shared 1 s timer, the same way the long-break bubble does.
+    // Hiding the bubble from a dispatch_after alone left the number frozen at its initial value.
+    _waterTime = time;
+    _waterMsLeft = (long)(seconds * 1000);
 
     EBOverlayWindow *window = [self windowWithView:view onDisplay:0 capturesInput:NO];
     [window setFrame:EBBottomRightRect(bubble.size, NSScreen.mainScreen.visibleFrame, 0) display:NO];
@@ -1039,11 +1087,8 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
     if (EBTraceOn())
         fprintf(stderr, "[EB] water reminder shown, %d ml, dismiss in %.0fs\n", ml, seconds);
 
-    __weak EBOverlayController *weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-                       [weakSelf hideWaterReminder];
-                   });
+    // No dispatch_after: the 1 s timer above reaches zero and hides the bubble, which is what keeps
+    // the number and the dismissal on one clock instead of two that can disagree.
 }
 
 // The long-break countdown owns the same corner, and the two timers are unrelated: a 50 minute break
@@ -1058,6 +1103,8 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
         [self.waterWnd orderOut:nil];
         self.waterWnd = nil;
     }
+    _waterTime = nil;
+    _waterMsLeft = 0;
 }
 
 - (void)hideAll {
@@ -1076,6 +1123,8 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
     _countdownMsLeft = 0;
     _longClock = nil;
     _longBreakMsLeft = 0;
+    _longArt = nil;
+    _longSwayPhase = 0;
     _shortImage = nil;
     _shortTime = nil;
     _shortBreakMsLeft = 0;

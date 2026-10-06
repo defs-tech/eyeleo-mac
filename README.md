@@ -140,6 +140,12 @@ So there is one baked bust and it moves, which makes that impossible by construc
 the second bug worth recording: it was first written as a fraction of the artwork height, and a fraction
 is not points, so the bust moved 0.04 pt and appeared frozen.
 
+**The long break now moves.** It was the one screen with no motion at all. It shows the same bust as
+the neck exercise, scaled up, leaning about 2.6 degrees to each side every six seconds. Generating a
+full-body figure was attempted and produced a quadruped, so the bust is reused and moved in code: one
+image, so the markings cannot drift, and a five minute break is long enough that a slow sway reads as
+relaxation rather than as a twitch.
+
 **A hydration reminder.** Same `skin4` bubble, same bottom-right corner, same 209x71 footprint as the
 long-break countdown, with a glass drawn in code where the portrait usually sits. Advisory only: it
 never takes input and never captures the keyboard.
