@@ -474,6 +474,10 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
 // a restart: the first one fires a full interval after launch, which is close enough, and not writing
 // it keeps the reminder from outliving the session that asked for it.
 - (void)restartWaterInterval {
+    if (self.waterTestFireSec > 0) {
+        _timeLeftToWaterMs = (long)self.waterTestFireSec * 1000;
+        return;
+    }
     _timeLeftToWaterMs = (long)_settings.waterIntervalMin * 60 * 1000;
 }
 
@@ -642,7 +646,15 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
                     if ([d waterReminderDeferred]) {
                         _timeLeftToWaterMs = 60 * 1000;
                     } else {
-                        _timeLeftToWaterMs = (long)_settings.waterIntervalMin * 60 * 1000;
+                        // One shot, cleared BEFORE the interval is recomputed. The hook exists so the
+                        // feature can be reached in seconds; if it repeated, the bubble would be refreshed
+                        // before it could expire and nothing could assert that it dismisses itself.
+                        // Clearing it after restartWaterInterval left the test interval in place and the
+                        // reminder fired twice, which failed the dismissal check.
+                        self.waterTestFireSec = 0;
+                        // Through restartWaterInterval, not a literal assignment: one place decides how
+                        // long until the next reminder, so the hook and the setting cannot diverge.
+                        [self restartWaterInterval];
                         [d presentWaterReminderWithVolumeMl:_settings.waterVolumeMl
                                                      seconds:EBWaterReminderSec];
                     }

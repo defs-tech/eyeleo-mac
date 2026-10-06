@@ -534,6 +534,8 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
             [self hideWaterReminder];
         } else {
             self.waterTime.stringValue = EBTimeLeftText(self.waterMsLeft, EBRussianNow(), NO);
+            if (EBTraceOn())
+                fprintf(stderr, "[EB] water bubble now shows '%s'\n", self.waterTime.stringValue.UTF8String);
         }
     }
 

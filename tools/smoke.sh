@@ -197,6 +197,58 @@ fi
 stop_app
 
 echo
+echo "== hydration reminder =="
+LOG="build/smoke-water.log"
+stop_app
+# The interval bottoms out at 15 minutes, so the first reminder is forced to 4 seconds. This cycle is
+# the only end-to-end cover the reminder gets; without it the feature is verified solely by unit tests
+# and by waiting a quarter of an hour, which is not a verification anyone repeats.
+launch EYELEO_DEBUG=1 EYELEO_TEST_WATER_SEC=4
+if wait_for "$LOG" 'water reminder shown' 60; then
+    check "reminder bubble is shown" "$LOG" 'water reminder shown, [0-9]+ ml'
+    check "it carries the configured portion" "$LOG" 'water reminder shown, 100 ml'
+    # The countdown has to actually move. It was frozen at its initial value once already, because the
+    # label was created and then only ever hidden, never updated. The label is written a tick after the
+    # bubble appears, so wait for it rather than sampling the log immediately.
+    if wait_for "$LOG" "water bubble now shows" 10; then
+        check "countdown starts" "$LOG" "water bubble now shows '0:[0-9][0-9]'"
+    else
+        red "  FAIL  countdown never started"
+        FAIL=$((FAIL + 1))
+    fi
+    # Waiting for a fixed sleep made this flaky once: the log had not advanced yet on a loaded
+    # machine. Wait for the countdown to have moved instead, then compare the ends.
+    for _ in $(seq 1 20); do
+        [[ $(grep -c "water bubble now shows" "$LOG") -ge 3 ]] && break
+        sleep 1
+    done
+    first=$(sed -n "s/.*water bubble now shows '\([^']*\)'.*/\1/p" "$LOG" | head -1)
+    second=$(sed -n "s/.*water bubble now shows '\([^']*\)'.*/\1/p" "$LOG" | tail -1)
+    if [[ -n "$first" && -n "$second" && "$first" != "$second" ]]; then
+        green "  PASS  countdown moves down ($first -> $second)"
+        PASS=$((PASS + 1))
+    else
+        red "  FAIL  countdown is stuck (first='${first:-none}' second='${second:-none}')"
+        FAIL=$((FAIL + 1))
+    fi
+    # The bubble must dismiss itself: it is advisory and must never hold the screen. Asserting on the
+    # window list is what makes it end to end rather than a claim about the trace.
+    sleep 16
+    listing=$(./build/windows EyeLeo 2>/dev/null)
+    if grep -q '209x71' <<<"$listing"; then
+        red "  FAIL  the reminder bubble is still on screen after its timeout"
+        FAIL=$((FAIL + 1))
+    else
+        green "  PASS  reminder dismisses itself and leaves nothing on screen"
+        PASS=$((PASS + 1))
+    fi
+else
+    red "  FAIL  the hydration reminder never appeared"
+    FAIL=$((FAIL + 1))
+fi
+stop_app
+
+echo
 echo "== result =="
 if ((FAIL == 0)); then
     green "$PASS checks passed, 0 failed"

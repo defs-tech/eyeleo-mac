@@ -177,6 +177,13 @@ BOOL EBTraceOn(void);
 // full cycle of breaks can be watched by hand. Never enable for normal use.
 @property(nonatomic) BOOL fastMode;
 
+// Test hook. The hydration interval bottoms out at 15 minutes, which makes the feature impossible to
+// exercise end to end: every attempt at verifying it costs a quarter of an hour, and over a wait that
+// long the machine falls into auto-relax, where the reminder correctly stays silent -- so a failure
+// looks exactly like a pass. With this set, the first reminder fires after the given number of seconds.
+// Guarded by persistenceSuspended like the other overrides, so a test run cannot persist it.
+@property(nonatomic) int waterTestFireSec;
+
 // Starts in STATE_FIRST_LAUNCH (fresh install) or STATE_IDLE (restored timers).
 - (void)startWithFirstLaunch:(BOOL)firstLaunch lastShutdown:(double)lastShutdown;
 

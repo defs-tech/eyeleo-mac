@@ -47,6 +47,7 @@ static NSString *const kBundleID = @"local.eyeleo.EyeLeo";
     //   EYELEO_FAST_MODE=1        run timers up to 8x faster
     //   EYELEO_DEBUG=1            trace state transitions to stderr
     //   EYELEO_TEST_INTERVAL_MIN  clamp both break intervals to N minutes
+    //   EYELEO_TEST_WATER_SEC     first hydration reminder after N seconds instead of the interval
     NSDictionary *env = NSProcessInfo.processInfo.environment;
 
     if ([env[@"EYELEO_FAST_MODE"] isEqualToString:@"1"]) {
@@ -59,6 +60,15 @@ static NSString *const kBundleID = @"local.eyeleo.EyeLeo";
 
     // Overrides beat the stored settings, which is what makes them usable for testing: the
     // sandboxed preferences cache in cfprefsd is not reliably writable from outside the app.
+    NSString *testWater = env[@"EYELEO_TEST_WATER_SEC"];
+    if (testWater.length) {
+        _core.waterTestFireSec = MAX(testWater.intValue, 1);
+        NSLog(@"[EyeLeo] EYELEO_TEST_WATER_SEC=%d, first hydration reminder after %d s",
+              _core.waterTestFireSec, _core.waterTestFireSec);
+        // Never persist a test run's settings, same as the other overrides.
+        _core.persistenceSuspended = YES;
+    }
+
     NSString *testInterval = env[@"EYELEO_TEST_INTERVAL_MIN"];
     NSString *testOnly = env[@"EYELEO_TEST_ONLY"];
     if (testInterval.length || testOnly.length) {
