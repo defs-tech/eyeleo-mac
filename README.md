@@ -253,6 +253,32 @@ trade was not taken.
   not complete for a non-active `LSUIElement` app, so the completion handler never ran and the short
   break never dismissed itself. The fade is stepped by a timer of our own instead.
 
+## Running it and looking at it
+
+```
+make                      # build and sign build/EyeLeo.app
+open build/EyeLeo.app     # menu bar only, no Dock icon
+```
+
+To see one specific exercise rather than waiting for it to come up in a draw of nine:
+
+```
+EYELEO_DEBUG=1 EYELEO_FAST_MODE=1 \
+EYELEO_TEST_INTERVAL_MIN=1 EYELEO_TEST_ONLY=short EYELEO_TEST_EXERCISE=9 \
+  ./build/EyeLeo.app/Contents/MacOS/EyeLeo
+```
+
+Running the binary directly rather than through `open` is deliberate: it is how `EYELEO_DEBUG` reaches
+it. In debug mode the trace prints the panel layout and, for the neck and shoulders exercise, the live
+transform values, which is how the two-layer animation is checked.
+
+The hydration reminder is the one thing that cannot be reached quickly otherwise, since its interval
+bottoms out at fifteen minutes:
+
+```
+EYELEO_DEBUG=1 EYELEO_TEST_WATER_SEC=6 ./build/EyeLeo.app/Contents/MacOS/EyeLeo
+```
+
 ## Debugging and test hooks
 
 All off unless the environment variable is set. `EYELEO_DEBUG` also traces every state transition.

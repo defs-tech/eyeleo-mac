@@ -725,7 +725,9 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
     _shortBreakMsLeft = durationMs;
 
     // Exercise and phrasing are chosen once per short break, as in the original.
-    EBExercise exercise = [EBExercisePicker pickAfter:EBExerciseNone windowNearby:windowNearby];
+    EBExercise exercise = self.forcedExercise != EBExerciseNone
+                             ? self.forcedExercise
+                             : [EBExercisePicker pickAfter:EBExerciseNone windowNearby:windowNearby];
     NSString *text = [EBExercisePicker textFor:exercise line:[EBExercisePicker pickLineFor:exercise]];
 
     // On specific break counts an aside replaces the exercise text.

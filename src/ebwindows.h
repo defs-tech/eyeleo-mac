@@ -16,6 +16,8 @@
 
 #import <AppKit/AppKit.h>
 
+#import "ebexercise.h"
+
 NS_ASSUME_NONNULL_BEGIN
 
 @protocol EBOverlayDelegate <NSObject>
@@ -33,6 +35,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic) BOOL strictMode;
 // Only then may a short break be dismissed with a right click.
 @property(nonatomic) BOOL canCloseNotifications;
+// Test hook: forces which exercise a short break shows. EBExerciseNone, the default, keeps the
+// original random pick. Without it, checking one exercise means waiting for it to come up in a draw of
+// nine, which is not something anyone does twice.
+@property(nonatomic) EBExercise forcedExercise;
 
 - (void)showLongBreakWithSeconds:(int)seconds;
 - (void)hideLongBreakAnimated:(BOOL)animated;

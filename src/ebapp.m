@@ -46,6 +46,7 @@ static NSString *const kBundleID = @"local.eyeleo.EyeLeo";
     // environment variables so a full cycle of breaks can be watched without recompiling:
     //   EYELEO_FAST_MODE=1        run timers up to 8x faster
     //   EYELEO_DEBUG=1            trace state transitions to stderr
+    //   EYELEO_TEST_EXERCISE      force which exercise a short break shows, 1..9
     //   EYELEO_TEST_INTERVAL_MIN  clamp both break intervals to N minutes
     //   EYELEO_TEST_WATER_SEC     first hydration reminder after N seconds instead of the interval
     NSDictionary *env = NSProcessInfo.processInfo.environment;
@@ -60,6 +61,15 @@ static NSString *const kBundleID = @"local.eyeleo.EyeLeo";
 
     // Overrides beat the stored settings, which is what makes them usable for testing: the
     // sandboxed preferences cache in cfprefsd is not reliably writable from outside the app.
+    NSString *testExercise = env[@"EYELEO_TEST_EXERCISE"];
+    if (testExercise.length) {
+        int n = testExercise.intValue;
+        if (n >= 1 && n <= EBNumExercises)
+            _overlays.forcedExercise = (EBExercise)n;
+        NSLog(@"[EyeLeo] EYELEO_TEST_EXERCISE=%@ -> exercise %d", testExercise, (int)_overlays.forcedExercise);
+        _core.persistenceSuspended = YES;
+    }
+
     NSString *testWater = env[@"EYELEO_TEST_WATER_SEC"];
     if (testWater.length) {
         _core.waterTestFireSec = MAX(testWater.intValue, 1);
