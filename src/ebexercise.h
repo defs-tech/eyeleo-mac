@@ -54,10 +54,18 @@ static const int EBNumExercises = 9; // exercises 1..9, matching the original's 
 @property(nonatomic, readonly) EBExercise exercise;
 @property(nonatomic, readonly, nullable) NSImage *image;
 
-// Offset the artwork must be drawn at, on top of its position in the panel. Identity for every
+// The second layer of the neck and shoulders exercise: the head, drawn separately from the torso so
+// the two can move independently. Nil for every other exercise, which is what tells the panel to
+// lay out a single image instead of a pair.
+@property(nonatomic, readonly, nullable) NSImage *headImage;
+
+// Offsets the artwork must be drawn at, on top of its position in the panel. Identity for every
 // exercise that swaps artwork instead of moving it. CATransform3D rather than CGAffineTransform
 // because it is assigned straight to CALayer.transform.
 @property(nonatomic, readonly) CATransform3D transform;
+// Applied to the head layer, which pivots at its own bottom edge so a rotation reads as tilting at
+// the neck rather than spinning the face.
+@property(nonatomic, readonly) CATransform3D headTransform;
 
 // Call once per 100 ms.
 - (void)advance;

@@ -133,12 +133,28 @@ both languages, same artwork. Nothing was removed or reworded. Three things were
 frame longer than the open one, because the point is a complete unhurried blink rather than a fast one.
 "Raise and lower your shoulders" is shown as a bust of the leopard.
 
-**The shoulder animation is code, not artwork.** Generating three separate frames was tried and failed:
-the leopard's rosettes came out differently in each one and crawled across the fur during the animation.
-So there is one baked bust and it moves, which makes that impossible by construction. The lift is
-3.4 pt, applied as a `CATransform3D` translation with a four-phase cycle. Getting that value wrong was
-the second bug worth recording: it was first written as a fraction of the artwork height, and a fraction
-is not points, so the bust moved 0.04 pt and appeared frozen.
+**The shoulder animation is code, not artwork.** Generating separate frames was tried and failed: the
+leopard's rosettes came out differently in each one and crawled across the fur. So the two layers are
+fixed and moved, which makes that impossible by construction.
+
+Two layers, not one. The first attempt baked the head and torso into a single image and translated it,
+which made the head travel with the shoulders; the eye saw a sliding picture, not a stretch. Split
+again, the head rotates about its own bottom edge while the torso lifts underneath, and the two
+disagreeing is what makes it read as a body.
+
+The head sinks 16 pt into the torso. Its own neck stub is about 11 px wide, so at a shallow overlap it
+stood out against the narrower top of the torso and the head looked like it was floating. Deep enough,
+the stub is entirely inside the torso and the junction disappears.
+
+Two errors in the asset tool are worth recording, both the same mistake: a bounding box measured on one
+image was applied to another. The head's box was measured on the scaled probe and then used to crop the
+unscaled 156x98 source, which sampled the wrong region; earlier, the torso was measured after its context
+had been released. Both produced assets that looked subtly wrong with no error message. The fix was to
+crop out of the probe, at the scale the box was measured in.
+
+`preview_phase0..3.png` in `build/` show the assembled figure at each phase, rendered four times up on the
+panel's own dark background. Judging a 156x88 image by eye in this environment was repeatedly misleading,
+so the tool writes a preview rather than relying on someone opening the app.
 
 **The long break now moves.** It was the one screen with no motion at all. It shows the same bust as
 the neck exercise, scaled up, leaning about 2.6 degrees to each side every six seconds. Generating a

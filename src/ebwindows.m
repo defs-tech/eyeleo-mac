@@ -1,6 +1,7 @@
 #import "ebwindows.h"
 
 #import <QuartzCore/QuartzCore.h>
+#include <math.h>
 #include <stdio.h>
 
 #import "ebassets.h"
@@ -170,6 +171,7 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
 @property(nonatomic, strong, nullable) EBOverlayWindow *notificationWindow;
 @property(nonatomic, strong, nullable) EBOverlayWindow *waterWnd;
 @property(nonatomic, strong, nullable) NSImageView *longArt;
+@property(nonatomic, strong, nullable) NSImageView *shortHead;
 @property(nonatomic, strong, nullable) NSTextField *waterTime;
 @property(nonatomic) long waterMsLeft;
 
@@ -237,6 +239,15 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
 
 @implementation EBFadeJob
 @end
+
+// How far the head layer overlaps the top of the torso in the neck and shoulders exercise. Must match
+// kTorsoHeadGap in tools/mkpersonage.m, which draws the previews from the same numbers.
+//
+// Sixteen, not five. The head's own neck stub is only about 11 px wide, so at a shallow overlap it stood
+// out against the narrower top of the torso and the head read as floating above the shoulders. Sunk this
+// deep the stub is entirely inside the torso and the junction disappears. The lift is 2.5 pt, so there is
+// still 13 pt of head-over-torso cover at the top of the cycle.
+static const CGFloat EBNeckOverlapPt = 16.0;
 
 static void DrawWaterGlass(CGFloat w, CGFloat h);
 
@@ -501,8 +512,16 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
         // The artwork is a subview, so its transform is invisible to CGWindowList: the probe reports
         // the window frame, which never moves. The value is traced here instead, which is the only
         // place it can actually be observed.
-        if (EBTraceOn() && self.animation.exercise == EBExerciseNeckShoulders)
-            fprintf(stderr, "[EB] shoulder lift %.2f pt\n", self.animation.transform.m42);
+        if (self.shortHead)
+            self.shortHead.layer.transform = self.animation.headTransform;
+        if (EBTraceOn() && self.animation.exercise == EBExerciseNeckShoulders) {
+            // acos, not asin: for a Z rotation CATransform3D stores cos in m11. Recovering the angle
+            // with asin reported 1.571 rad, that is 90 degrees, for a rotation of zero.
+            float m11 = self.animation.headTransform.m11;
+            m11 = m11 > 1.0f ? 1.0f : (m11 < -1.0f ? -1.0f : m11);
+            fprintf(stderr, "[EB] shoulder lift %.2f pt, head tilt %.3f rad\n",
+                    self.animation.transform.m42, acos(m11));
+        }
         self.shortBreakMsLeft -= 100;
         self.shortTime.stringValue = EBTimeLeftText(MAX(self.shortBreakMsLeft, 0), EBRussianNow(), NO);
         if (self.shortBreakMsLeft <= 0)
@@ -751,17 +770,45 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
                 [view addSubview:title];
             }
 
+            // Everything here is measured from the bottom of the panel, like AppKit. The image sits
+            // just below the title; the original started it at 38 from the top, which overlapped the
+            // title, and mixing the two coordinate systems put it off the panel.
+            CGFloat artTop = titleBottom - 6;
+            NSImage *headArt = _animation.headImage;
             NSImage *art = _animation.image;
-            if (art) {
-                // Everything here is measured from the bottom of the panel, like AppKit. The image
-                // sits just below the title; the original started it at 38 from the top, which
-                // overlapped the title, and mixing the two coordinate systems put it off the panel.
-                CGFloat artTop = titleBottom - 6;
+
+            if (headArt && art) {
+                // Two layers, bottom-aligned as one figure. The head overlaps the top of the torso by
+                // EBNeckOverlapPt so the seam stays covered while the torso lifts underneath it.
+                CGFloat torsoW = art.size.width, torsoH = art.size.height;
+                CGFloat headW = headArt.size.width, headH = headArt.size.height;
+                CGFloat totalH = headH + torsoH - EBNeckOverlapPt;
+                CGFloat baseY = artTop - totalH;
+
+                NSImageView *torso = [[NSImageView alloc] initWithFrame:NSMakeRect(18, baseY, torsoW, torsoH)];
+                torso.image = art;
+                torso.wantsLayer = YES;
+                torso.layer.transform = _animation.transform;
+                [view addSubview:torso];
+                _shortImage = torso;
+
+                NSImageView *head = [[NSImageView alloc] initWithFrame:NSMakeRect(18 + (torsoW - headW) / 2.0,
+                                                                                baseY + torsoH - EBNeckOverlapPt,
+                                                                                headW, headH)];
+                head.image = headArt;
+                head.wantsLayer = YES;
+                // Pivot on the bottom edge: the head is a separate layer, and rotating it about its own
+                // centre would swing the face away from the neck instead of tilting it.
+                head.layer.anchorPoint = CGPointMake(0.5, 0.0);
+                head.layer.transform = _animation.headTransform;
+                [view addSubview:head];
+                _shortHead = head;
+            } else if (art) {
                 NSImageView *image = [[NSImageView alloc] initWithFrame:NSMakeRect(18, artTop - art.size.height,
                                                                                     art.size.width, art.size.height)];
                 image.image = art;
-                // Layer-backed so the shoulder lift can be a transform on the whole artwork rather
-                // than a different bitmap per pose. One baked bust means the rosettes cannot crawl.
+                // Layer-backed so a moving exercise can be a transform rather than a different bitmap
+                // per pose, which is what keeps the rosettes from crawling.
                 image.wantsLayer = YES;
                 image.layer.transform = _animation.transform;
                 [view addSubview:image];
@@ -816,6 +863,7 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
 - (void)hideShortBreakAnimated:(BOOL)animated {
     [self restoreSuspendedApplication];
     _shortImage = nil;
+    _shortHead = nil;
     _shortTime = nil;
     _animation = nil;
     _shortBreakMsLeft = 0;
@@ -1128,6 +1176,7 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
     _longArt = nil;
     _longSwayPhase = 0;
     _shortImage = nil;
+    _shortHead = nil;
     _shortTime = nil;
     _shortBreakMsLeft = 0;
     _shortBreakClosable = NO;

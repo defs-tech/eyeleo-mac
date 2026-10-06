@@ -39,6 +39,12 @@ enum { EBNumPersonageFrames = 8 };
 - (nullable NSImage *)noticeLeopard; // notification_leopard.png
 - (nullable NSImage *)personage:(EBPersonageFrame)frame;
 
+// The two halves of the neck and shoulders exercise, 156x46 and 90x57. Kept apart on purpose: baked
+// into one image, the head moves with the torso and the result reads as a sliding picture rather than
+// a stretch. Both come out of tools/mkpersonage.m, the head from the app's own artwork.
+- (nullable NSImage *)shouldersTorso;
+- (nullable NSImage *)shouldersHead;
+
 // Drops the personage frames. Called when a break ends; the common case holds none at all,
 // because short breaks are the only consumer.
 - (void)purgePersonage;

@@ -68,7 +68,7 @@ static NSString *KeyFor(EBExercise exercise, int line) {
         if (exercise == EBExerciseWindow)
             _current = EBAssets.shared.windowImage;
         else if (exercise == EBExerciseNeckShoulders)
-            _current = [EBAssets.shared personage:EBFrameShoulders];
+            _current = [EBAssets.shared shouldersTorso];
         else
             _current = [EBAssets.shared personage:EBFrameDefault];
     }
@@ -132,9 +132,11 @@ static NSString *KeyFor(EBExercise exercise, int line) {
         break;
 
     case EBExerciseNeckShoulders:
-        // Deliberately not an image swap. Generating three separate frames was tried and the leopard's
-        // rosettes came out differently in each one, so the markings crawled during the animation. A
-        // single baked bust is moved instead, which makes that impossible by construction.
+        // Deliberately not an image swap. Generating separate frames was tried and the leopard's
+        // rosettes came out differently in each one, so the markings crawled during the animation. Two
+        // fixed layers moving independently makes that impossible by construction, and unlike moving
+        // one baked image it actually reads as a body: the head tilts at the neck while the shoulders
+        // go up and down underneath it.
         _shoulderPhase = (_shoulderPhase + 1) % 4;
         _timeout = 350;
         break;
@@ -144,22 +146,38 @@ static NSString *KeyFor(EBExercise exercise, int line) {
     }
 }
 
-// How far the bust rides up, in points of the panel's own coordinate space -- not a fraction of the
-// artwork. The artwork is 156x98, so 3.4 pt is about 3.5% of it: enough to read as a shoulder lift,
-// small enough that the ears do not climb into the title. Getting this wrong by treating the value
-// as a fraction produced a 0.04 pt move, invisible in practice.
-static const double kShoulderLiftPt = 3.4;
+// How far the torso rises, in points of the panel's own coordinate space -- not a fraction of the
+// artwork. Getting that wrong by treating the value as a fraction produced a 0.04 pt move, invisible in
+// practice. 2.5 pt against a 5 px overlap between the layers leaves the neck covered at every phase.
+static const double kShoulderLiftPt = 2.5;
+// How far the head leans, in radians: about 7 degrees, enough to read as a tilt without looking like
+// the face is falling off the neck.
+static const double kNeckTiltRad = 0.12;
+
+// Four phases per cycle: rest, lifted, rest, pressed. The rest phase between the two extremes is what
+// makes the movement read as a deliberate roll rather than a twitch.
+static const double kLiftPhases[4] = { 0.0, 1.0, 0.0, -0.4 };
+static const double kTiltPhases[4] = { 0.0, 0.7, 0.0, -0.7 };
+
+- (NSImage *)headImage {
+    return _exercise == EBExerciseNeckShoulders ? [EBAssets.shared shouldersHead] : nil;
+}
 
 - (CATransform3D)transform {
     if (_exercise != EBExerciseNeckShoulders)
         return CATransform3DIdentity;
 
-    // Four phases per cycle: low, high, low, rest. The rest phase is what makes the movement read as
-    // deliberate rather than as a twitch, and matches the unhurried pace of the original's exercises.
     // CALayer's y axis points up, so a lift is a positive translation.
-    static const double kOffsets[4] = { 0.0, 1.0, 0.0, -0.35 };
-    double lift = kOffsets[_shoulderPhase] * kShoulderLiftPt;
+    double lift = kLiftPhases[_shoulderPhase] * kShoulderLiftPt;
     return CATransform3DMakeTranslation(0, (float)lift, 0);
+}
+
+- (CATransform3D)headTransform {
+    if (_exercise != EBExerciseNeckShoulders)
+        return CATransform3DIdentity;
+
+    double tilt = kTiltPhases[_shoulderPhase] * kNeckTiltRad;
+    return CATransform3DMakeRotation((float)tilt, 0, 0, 1);
 }
 
 @end

@@ -90,9 +90,19 @@ static NSString *const kPersonageNames[EBNumPersonageFrames] = {
     return [self load:kPersonageNames[frame] inDirectory:@"Personages"];
 }
 
+- (NSImage *)shouldersTorso {
+    return [self load:@"leopard_shoulders_torso" inDirectory:@"Personages"];
+}
+
+- (NSImage *)shouldersHead {
+    return [self load:@"leopard_shoulders_head" inDirectory:@"Personages"];
+}
+
 - (void)purgePersonage {
     for (int i = 0; i < EBNumPersonageFrames; i++)
         [_cache removeObjectForKey:kPersonageNames[i]];
+    [_cache removeObjectForKey:@"leopard_shoulders_torso"];
+    [_cache removeObjectForKey:@"leopard_shoulders_head"];
 }
 
 @end
