@@ -142,6 +142,16 @@
 "unit.second.few" = "seconds";
 "unit.second.many" = "seconds";
 "unit.second.one" = "second";
+"mini_pause_text_8_1" = "Take a short break!\nClose your eyes fully and gently, ten times.";
+"mini_pause_text_8_2" = "Time for a short break!\nClose your eyes fully and gently, ten times.";
+"mini_pause_text_8_3" = "Break!\nClose your eyes fully and gently, ten times.";
+"mini_pause_text_8_4" = "Time for a break!\nClose your eyes fully and gently, ten times.";
+"mini_pause_text_8_5" = "Short break!\nClose your eyes fully and gently, ten times.";
+"mini_pause_text_9_1" = "Take a short break!\nRaise and lower your shoulders.";
+"mini_pause_text_9_2" = "Time for a short break!\nRaise and lower your shoulders.";
+"mini_pause_text_9_3" = "Break!\nRaise and lower your shoulders.";
+"mini_pause_text_9_4" = "Time for a break!\nRaise and lower your shoulders.";
+"mini_pause_text_9_5" = "Short break!\nRaise and lower your shoulders.";
 "mini_pause_text_check_eyeleo" = "Sit a little further from the screen.";
 "mini_pause_text_donate" = "Blinking keeps the eyes moist.";
 "mini_pause_text_tell_friend" = "Twenty twenty: every 20 minutes, look 20 feet away.";

@@ -20,9 +20,13 @@ typedef NS_ENUM(int, EBExercise) {
     EBExerciseBlink,
     EBExerciseWindow,      // look at distant objects; excluded unless "window nearby" is on
     EBExerciseStretch,
+    // Added in the port, ids 8 and 9. Nothing existing was removed or reworded: the two new
+    // exercises simply join the pool, and every id 1..7 keeps its original text and artwork.
+    EBExerciseBlinkFully,  // close the eyes fully and gently, ten times
+    EBExerciseNeckShoulders, // roll and release the shoulders
 };
 
-static const int EBNumExercises = 7; // exercises 1..7
+static const int EBNumExercises = 9; // exercises 1..9, matching the original's 1..7 plus the two new
 
 @interface EBExercisePicker : NSObject
 
@@ -49,6 +53,11 @@ static const int EBNumExercises = 7; // exercises 1..7
 
 @property(nonatomic, readonly) EBExercise exercise;
 @property(nonatomic, readonly, nullable) NSImage *image;
+
+// Offset the artwork must be drawn at, on top of its position in the panel. Identity for every
+// exercise that swaps artwork instead of moving it. CATransform3D rather than CGAffineTransform
+// because it is assigned straight to CALayer.transform.
+@property(nonatomic, readonly) CATransform3D transform;
 
 // Call once per 100 ms.
 - (void)advance;

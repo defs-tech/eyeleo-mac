@@ -440,6 +440,12 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
     if (self.shortBreakMsLeft > 0) {
         [self.animation advance];
         self.shortImage.image = self.animation.image;
+        self.shortImage.layer.transform = self.animation.transform;
+        // The artwork is a subview, so its transform is invisible to CGWindowList: the probe reports
+        // the window frame, which never moves. The value is traced here instead, which is the only
+        // place it can actually be observed.
+        if (EBTraceOn() && self.animation.exercise == EBExerciseNeckShoulders)
+            fprintf(stderr, "[EB] shoulder lift %.2f pt\n", self.animation.transform.m42);
         self.shortBreakMsLeft -= 100;
         self.shortTime.stringValue = EBTimeLeftText(MAX(self.shortBreakMsLeft, 0), EBRussianNow(), NO);
         if (self.shortBreakMsLeft <= 0)
@@ -656,6 +662,10 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
                 NSImageView *image = [[NSImageView alloc] initWithFrame:NSMakeRect(18, artTop - art.size.height,
                                                                                     art.size.width, art.size.height)];
                 image.image = art;
+                // Layer-backed so the shoulder lift can be a transform on the whole artwork rather
+                // than a different bitmap per pose. One baked bust means the rosettes cannot crawl.
+                image.wantsLayer = YES;
+                image.layer.transform = _animation.transform;
                 [view addSubview:image];
                 _shortImage = image;
             }

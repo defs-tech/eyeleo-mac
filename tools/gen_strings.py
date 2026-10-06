@@ -43,11 +43,34 @@ RU_EXERCISE_VERB = {
     5: "Моргайте.",
     6: "Посмотрите вдаль за окно.",
     7: "Потянитесь.",
+    # Added in the port. Ids 8 and 9 do not exist in the original langpack, so all five phrasings are
+    # written out below rather than derived from it. Ids 1..7 are untouched.
+    8: "Закройте глаза полностью и мягко, десять раз.",
+    9: "Поднимите и опустите плечи.",
+}
+
+# Full phrasings for the two exercises added in the port. The four templated lines the generator
+# derives from RU_EXERCISE_VERB ("Время для перерыва.", "Короткий перерыв!") read acceptably for
+# these two as well, so only lines 1-3 need writing.
+RU_PORT_ADDED = {
+    8: [
+        "Короткий перерыв!\nЗакройте глаза полностью и мягко, десять раз.",
+        "Время для перерыва!\nЗакройте глаза полностью и мягко, десять раз.",
+        "Перерыв!\nЗакройте глаза полностью и мягко, десять раз.",
+    ],
+    9: [
+        "Короткий перерыв!\nПоднимите и опустите плечи.",
+        "Время для перерыва!\nПоднимите и опустите плечи.",
+        "Перерыв!\nПоднимите и опустите плечи.",
+    ],
 }
 RU_EXTRA = {}
 for ex, verb in RU_EXERCISE_VERB.items():
     RU_EXTRA[f"mini_pause_text_{ex}_4"] = f"Время для перерыва.\n{verb}"
     RU_EXTRA[f"mini_pause_text_{ex}_5"] = f"Короткий перерыв!\n{verb}"
+for ex, lines in RU_PORT_ADDED.items():
+    for idx, text in enumerate(lines, start=1):
+        RU_EXTRA[f"mini_pause_text_{ex}_{idx}"] = text
 
 # Milestone lines. The original spends four of its eight slots on donation and update
 # prompts; those are replaced with neutral reminders.
@@ -56,6 +79,17 @@ NEUTRAL = {
         "mini_pause_text_donate": "Blinking keeps the eyes moist.",
         "mini_pause_text_check_eyeleo": "Sit a little further from the screen.",
         "mini_pause_text_tell_friend": "Twenty twenty: every 20 minutes, look 20 feet away.",
+        # Exercises 8 and 9, added in the port. Ids 1..7 keep the original wording untouched.
+        "mini_pause_text_8_1": "Take a short break!\nClose your eyes fully and gently, ten times.",
+        "mini_pause_text_8_2": "Time for a short break!\nClose your eyes fully and gently, ten times.",
+        "mini_pause_text_8_3": "Break!\nClose your eyes fully and gently, ten times.",
+        "mini_pause_text_8_4": "Time for a break!\nClose your eyes fully and gently, ten times.",
+        "mini_pause_text_8_5": "Short break!\nClose your eyes fully and gently, ten times.",
+        "mini_pause_text_9_1": "Take a short break!\nRaise and lower your shoulders.",
+        "mini_pause_text_9_2": "Time for a short break!\nRaise and lower your shoulders.",
+        "mini_pause_text_9_3": "Break!\nRaise and lower your shoulders.",
+        "mini_pause_text_9_4": "Time for a break!\nRaise and lower your shoulders.",
+        "mini_pause_text_9_5": "Short break!\nRaise and lower your shoulders.",
     },
     "ru": {
         "mini_pause_text_donate": "Моргание увлажняет глаза.",

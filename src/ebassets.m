@@ -77,25 +77,22 @@
     return [self load:@"notification_leopard"];
 }
 
+// Indexed by the raw enum value, so EBPersonageFrame and this array are one list, not two.
+static NSString *const kPersonageNames[EBNumPersonageFrames] = {
+    @"leopard_default", @"leopard_look_left", @"leopard_look_right",
+    @"leopard_look_up", @"leopard_look_down", @"leopard_blink",
+    @"leopard_close_tightly", @"leopard_shoulders",
+};
+
 - (NSImage *)personage:(EBPersonageFrame)frame {
-    static NSString *const names[] = {
-        @"leopard_default", @"leopard_look_left", @"leopard_look_right",
-        @"leopard_look_up", @"leopard_look_down", @"leopard_blink",
-        @"leopard_close_tightly",
-    };
-    if (frame < 0 || frame > EBFrameCloseTightly)
+    if (frame < 0 || frame >= EBNumPersonageFrames)
         return nil;
-    return [self load:names[frame] inDirectory:@"Personages"];
+    return [self load:kPersonageNames[frame] inDirectory:@"Personages"];
 }
 
 - (void)purgePersonage {
-    static NSString *const names[] = {
-        @"leopard_default", @"leopard_look_left", @"leopard_look_right",
-        @"leopard_look_up", @"leopard_look_down", @"leopard_blink",
-        @"leopard_close_tightly",
-    };
-    for (NSUInteger i = 0; i < sizeof(names) / sizeof(names[0]); i++)
-        [_cache removeObjectForKey:names[i]];
+    for (int i = 0; i < EBNumPersonageFrames; i++)
+        [_cache removeObjectForKey:kPersonageNames[i]];
 }
 
 @end
