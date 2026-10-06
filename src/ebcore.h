@@ -50,6 +50,24 @@ static const double EBWarningIntervalMaxMin = 3.0;
 // EBLongBreakConfirmationSec leaves no room to count down before the dialog opens.
 static const double EBWarningIntervalMinMin = 20.0 / 60.0;
 
+// How long the hydration bubble stays up. Long enough to read the instruction and reach for a glass,
+// short enough not to become the thing that is being complained about.
+static const int EBWaterReminderSec = 15;
+
+// Hydration reminders. Both lists come from the settings popup and are the only combinations a user
+// can pick, so the clamp in clampSettings pulls a value back onto its list rather than inventing a
+// bound: a hand-edited plist must not be able to produce an interval the popup cannot show.
+//
+// The default is 30 min / 100 ml, so the hourly total is 200 ml delivered as two comfortable sips
+// rather than one 200 ml glass. NIOSH notes that shorter intervals work better than large amounts
+// infrequently, which is what the small default portion follows. The worst combination the popup
+// allows is 15 min x 250 ml = 1000 ml/hour, comfortably under the 1414 ml/hour ceiling above which
+// water intoxication becomes a risk; no settings combination can breach it.
+static const int kWaterIntervalsMin[] = { 15, 20, 25, 30, 45, 60, 90, 120 };
+static const int kWaterVolumesMl[] = { 50, 100, 150, 200, 250 };
+static const int EBWaterIntervalDefaultMin = 30;
+static const int EBWaterVolumeDefaultMl = 100;
+
 typedef struct {
     BOOL bigPauseEnabled;
     int bigPauseInterval; // minutes
@@ -66,6 +84,9 @@ typedef struct {
     BOOL inactivityTracking;
     BOOL showNotifications;
     BOOL miniPauseFullscreen;
+    BOOL waterReminderEnabled;
+    int waterIntervalMin;
+    int waterVolumeMl;
 } EBSettings;
 
 typedef struct {
@@ -115,6 +136,10 @@ BOOL EBTraceOn(void);
 - (void)presentWaiting;
 - (void)dismissWaiting;
 - (void)presentShortBreakShowCount:(unsigned)showCount fullscreen:(BOOL)fullscreen;
+// Added in the port: the hydration reminder. waterReminderDeferred is YES when the long-break countdown
+// owns the bottom-right corner, in which case the core must not present and should retry later.
+- (void)presentWaterReminderWithVolumeMl:(int)ml seconds:(int)seconds;
+- (BOOL)waterReminderDeferred;
 - (void)dismissShortBreak;
 - (void)updateStatusTitle:(NSString *)title isPaused:(BOOL)paused;
 - (void)postNotificationKey:(NSString *)key duration:(nullable NSString *)duration;
@@ -186,6 +211,10 @@ BOOL EBTraceOn(void);
 
 // Recomputes break durations after the settings window closed.
 - (void)settingsDidClose;
+
+// Exposed for the tests: the same clamp the app applies on load and on save. Reading it through the
+// public settings property instead would not distinguish "clamped to 30" from "already 30".
+- (EBSettings)clampSettings:(EBSettings)s;
 
 // Tooltip text for the menu bar, honouring the paused and disabled cases.
 - (nullable NSString *)statusTitleWithLanguage:(NSString *)language;

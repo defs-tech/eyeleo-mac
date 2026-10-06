@@ -65,6 +65,15 @@ static NSArray<NSString *> *AllKeys(void) {
         [keys addObject:[NSString stringWithFormat:@"settings_mini_pause_value_%d", i]];
     for (int i = 1; i <= 3; i++)
         [keys addObject:[NSString stringWithFormat:@"settings_mini_pause_duration_value_%d", i]];
+    for (int i = 1; i <= 8; i++)
+        [keys addObject:[NSString stringWithFormat:@"settings_water_interval_value_%d", i]];
+    for (int i = 1; i <= 5; i++)
+        [keys addObject:[NSString stringWithFormat:@"settings_water_volume_value_%d", i]];
+    [keys addObject:@"water_reminder_label"];
+    [keys addObject:@"settings_water_group_label"];
+    [keys addObject:@"settings_water_reminder_label"];
+    [keys addObject:@"settings_water_interval_label"];
+    [keys addObject:@"settings_water_volume_label"];
     return keys;
 }
 

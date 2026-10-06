@@ -56,6 +56,17 @@ NS_ASSUME_NONNULL_BEGIN
 // A self-dismissing bubble in the bottom-right corner. Replaces the Windows tray balloon so the
 // app never has to ask for the Notifications permission.
 - (void)showNotificationWithText:(NSString *)text seconds:(NSTimeInterval)seconds;
+
+// Hydration reminder. Built from the same skin4 bubble and in the same bottom-right corner as the
+// long-break countdown, but with a drawn glass instead of the leopard portrait and an auto-dismiss
+// countdown instead of a time remaining until an event. Added in the port.
+- (void)showWaterReminderWithVolumeMl:(int)ml seconds:(NSTimeInterval)seconds;
+// Yields YES when the long-break countdown owns the corner and the reminder was deferred. The core
+// retries rather than dropping the reminder: the two run on unrelated intervals and do collide.
+- (BOOL)showWaterReminderDeferred;
+// YES while the long-break countdown bubble is up.
+- (BOOL)countdownVisible;
+- (void)hideWaterReminder;
 - (void)hideNotification;
 
 // Everything, immediately. Used on quit and when monitoring is suspended.

@@ -124,6 +124,55 @@ dialog's own 6-second counter still runs in real seconds. The thresholds are not
 `clampSettings`. The popup only offers 20/30/60/90 seconds, so the floor exists for a hand-edited or
 corrupted settings file: below 6 seconds the notice would have no time to count down at all.
 
+## What was added in the port
+
+The original had seven exercises and that is still true of exercises 1..7: same ids, same wording in
+both languages, same artwork. Nothing was removed or reworded. Three things were added.
+
+**Two exercises, ids 8 and 9.** "Close your eyes fully and gently, ten times" holds the closed-eyes
+frame longer than the open one, because the point is a complete unhurried blink rather than a fast one.
+"Raise and lower your shoulders" is shown as a bust of the leopard.
+
+**The shoulder animation is code, not artwork.** Generating three separate frames was tried and failed:
+the leopard's rosettes came out differently in each one and crawled across the fur during the animation.
+So there is one baked bust and it moves, which makes that impossible by construction. The lift is
+3.4 pt, applied as a `CATransform3D` translation with a four-phase cycle. Getting that value wrong was
+the second bug worth recording: it was first written as a fraction of the artwork height, and a fraction
+is not points, so the bust moved 0.04 pt and appeared frozen.
+
+**A hydration reminder.** Same `skin4` bubble, same bottom-right corner, same 209x71 footprint as the
+long-break countdown, with a glass drawn in code where the portrait usually sits. Advisory only: it
+never takes input and never captures the keyboard.
+
+The values behind it. The 15-20 minute figure you will find in occupational health guidance is for
+work in heat, where sweat loss is real; it does not transfer to sitting at a desk. The relevant study
+for sedentary office workers (PMC8998380) found a baseline of about 763 ml/day and measured its
+questionnaire against 30-60 minute intervals, not 15-20. So the default is 30 minutes / 100 ml: still
+200 ml an hour, but delivered as two sips rather than one 200 ml glass, which is also what NIOSH means
+by preferring shorter intervals over large amounts infrequently.
+
+The reminder counts working time only: it is decremented inside the idle branch, so a break pauses it
+rather than letting reminders pile up against someone who was away from the desk. It also does not fire
+while the app is in auto-relax, which after eight idle minutes is where a machine nobody is sitting at
+sits. Both are deliberate, and both are worth knowing about when testing: a fifteen minute test on an
+untouched machine will not show a reminder, because auto-relax arrives at minute eight.
+
+The interval list is 15/20/25/30/45/60/90/120 and the portion list 50-250 ml. The worst combination
+those two lists allow is 15 min x 250 ml = 1000 ml/hour, against the 1414 ml/hour ceiling above which
+NIOSH warns about water intoxication. No settings combination can breach it, and a test asserts it.
+
+## Reading settings written by other tools
+
+`PutBool` stores 0/1, so the app's own files are numbers where a flag is expected. That meant
+`ReadBool`, which went through the number reader, silently ignored any `<true/>` or `<false/>` — and
+that is exactly how plists are written by `defaults`, `PlistBuddy`, or anything that edits the file as
+XML. The symptom was a checkbox that turned itself back on. Both encodings are accepted now, and a
+test writes a plist with real booleans and checks that `<false/>` is read as false rather than as
+absent.
+
+Related: writing the plist file directly, even with `plistlib`, changes nothing observable, because
+`CFPreferencesCopyAppValue` is served from `cfprefsd`'s cache. See the gotchas section.
+
 ## Taking the keyboard and mouse during a break
 
 You asked for the break to actually stop you working: dim the screen and take the keyboard and mouse
@@ -237,6 +286,25 @@ solid white border which was the *window shape* mask (`SetShape(region(bitmap, *
 never meant to be drawn; drawing them on macOS produced a white outline around every panel. They are
 still used for their sizes, and the dark rounded background is drawn instead.
 
+## Two gotchas worth knowing about
+
+**The countdown bubble must be placed against `visibleFrame`, not `frame`.** The long-break notice
+used to be positioned against the full display, so it started at y=0, which is where the Dock is. On a
+60 pt Dock, 60 of its 71 points were under the panel and only the top sliver was visible. Every floating
+overlay now goes through `EBBottomRightRect` or `EBCenteredRect`, which take the work area.
+
+**Editing the settings plist behind cfprefsd's back changes nothing.** `CFPreferencesCopyAppValue` is
+served from `cfprefsd`'s cache, and writing `~/Library/Containers/.../local.eyeleo.EyeLeo.plist` with
+`plistlib` does not invalidate it. The symptom is convincing and completely misleading: the file on
+disk holds the new value, a fresh process still reports the old one, and the trace looks like a broken
+read. `killall -u $USER cfprefsd` makes the new value appear, which is what proved the code was fine.
+Edit settings through the app, or through `defaults write` on the domain, not by writing the file.
+
+**A layer transform on a subview is invisible to `CGWindowListCopyWindowInfo`.** Verifying the shoulder
+lift through the window list reported a flat 396.0 for thirty samples, because the window frame does not
+move when a child view is transformed. The value is traced from the animation itself instead. Anything
+measured about a window position is a statement about the window, not about its contents.
+
 ## Deliberate differences from the Windows original
 
 - **Activity detection and fullscreen detection are permission-free.** Discussed above; this is the
@@ -309,13 +377,14 @@ src/ebgeometry.{h,m}   overlay placement as pure functions, unit-tested against 
 src/ebsettingsui.{h,m} settings window
 src/ebapp.{h,m}       menu bar, menu, scheduler, single instance, login item
 src/ebtrace.{h,m}     startup and state tracing
+tools/mkpersonage.m    keys the generated bust off its flat background and composites the app's own head
 tools/gen_strings.py  regenerates both .strings files from the original langpacks
 tools/mkicon.m        draws the menu bar template icons and the app icon
 tools/measure.sh      the numbers above
 tools/check_strings.m localization coverage and plural spot-checks
 tools/windows.m       lists on-screen windows (bounds only; needs no permission)
 tools/smoke.sh       end-to-end check of the built app, not just the core
-tests/                146 checks over the core state machine and the overlay geometry
+tests/                176 checks over the core state machine, the overlay geometry and the settings file
 ```
 
 ## Tests

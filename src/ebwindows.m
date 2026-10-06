@@ -168,6 +168,7 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
 @property(nonatomic, strong) NSMutableArray<EBOverlayWindow *> *waitingWnds;
 @property(nonatomic, strong, nullable) EBOverlayWindow *countdownWnd;
 @property(nonatomic, strong, nullable) EBOverlayWindow *notificationWindow;
+@property(nonatomic, strong, nullable) EBOverlayWindow *waterWnd;
 
 @property(nonatomic, strong, nullable) NSTextField *longClock;
 @property(nonatomic, strong, nullable) NSImageView *shortImage;
@@ -232,6 +233,17 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
 @implementation EBFadeJob
 @end
 
+static void DrawWaterGlass(CGFloat w, CGFloat h);
+
+@interface EBWaterGlassView : NSView
+@end
+
+@implementation EBWaterGlassView
+- (void)drawRect:(NSRect)dirty {
+    DrawWaterGlass(NSWidth(self.bounds), NSHeight(self.bounds));
+}
+@end
+
 @implementation EBOverlayController
 
 - (instancetype)init {
@@ -254,6 +266,46 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
         dispatch_source_cancel(_slowTimer);
     if (_fadeTimer)
         dispatch_source_cancel(_fadeTimer);
+}
+
+// The hydration glass, drawn rather than shipped as art. It sits alone in the bubble with no leopard
+// next to it, so a flat render cannot clash with the painted portrait the way a mismatched raster
+// would, and it stays editable instead of being a binary blob. 71x44 matches notification_leopard.png,
+// the slot this art replaces.
+static void DrawWaterGlass(CGFloat w, CGFloat h) {
+    CGFloat glassW = w * 0.46, glassH = h * 0.72;
+    CGFloat glassX = (w - glassW) / 2.0, glassY = (h - glassH) / 2.0;
+
+    NSBezierPath *glass = [NSBezierPath bezierPathWithRoundedRect:NSMakeRect(glassX, glassY, glassW, glassH)
+                                                          xRadius:3
+                                                          yRadius:3];
+    glass.lineWidth = 1.5;
+    [[NSColor colorWithSRGBRed:0.72 green:0.85 blue:0.95 alpha:0.55] setStroke];
+    [glass stroke];
+
+    // Water at three quarters, with a flat surface and a lighter meniscus, so it reads as a liquid
+    // rather than as a filled rectangle.
+    NSRect waterRect = NSMakeRect(glassX + 2, glassY + 2, glassW - 4, glassH * 0.62);
+    NSBezierPath *water = [NSBezierPath bezierPathWithRoundedRect:waterRect xRadius:2 yRadius:2];
+    [[NSColor colorWithSRGBRed:0.26 green:0.60 blue:0.85 alpha:0.85] setFill];
+    [water fill];
+
+    NSBezierPath *surface = [NSBezierPath bezierPathWithOvalInRect:
+        NSMakeRect(glassX + 2, glassY + 2 + glassH * 0.62 - 2, glassW - 4, 4)];
+    [[NSColor colorWithSRGBRed:0.62 green:0.86 blue:0.96 alpha:0.9] setFill];
+    [surface fill];
+
+    // One highlight down the left side.
+    NSBezierPath *shine = [NSBezierPath bezierPathWithRoundedRect:
+        NSMakeRect(glassX + 5, glassY + 7, 2.5, glassH - 16)
+                                                       xRadius:1.25
+                                                       yRadius:1.25];
+    [[NSColor colorWithWhite:1 alpha:0.35] setFill];
+    [shine fill];
+}
+
+- (BOOL)countdownVisible {
+    return self.countdownWnd.isVisible;
 }
 
 - (BOOL)anyVisible {
@@ -941,9 +993,77 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
     }
 }
 
+#pragma mark - Hydration reminder
+
+// Same bubble, same corner, same 209x71 footprint as the long-break countdown, so the two read as
+// one family of notices. What differs is the payload: a drawn glass instead of the leopard, and a
+// countdown to dismissal rather than a time remaining until a break.
+- (void)showWaterReminderWithVolumeMl:(int)ml seconds:(NSTimeInterval)seconds {
+    [self hideWaterReminder];
+
+    NSImage *bubble = EBAssets.shared.bubble;
+    if (!bubble)
+        return;
+
+    NSView *view = PanelBackground(bubble.size);
+
+    CGFloat artW = 71, artX = 6;
+    CGFloat artY = (bubble.size.height - 44) / 2.0;
+    // A plain NSView subclass rather than a layer drawHandler: the drawing needs a flipped, AppKit
+    // coordinate system, and the glass is defined in points from the bottom like the rest of the UI.
+    EBWaterGlassView *art = [[EBWaterGlassView alloc] initWithFrame:NSMakeRect(artX, artY, artW, 44)];
+    [view addSubview:art];
+
+    CGFloat textLeft = artX + artW + 8;
+    CGFloat textWidth = bubble.size.width - textLeft - 10;
+
+    // The text column is only about 114 pt wide, so the caption carries just the instruction. The
+    // portion size would not fit next to it, and it belongs in the settings anyway.
+    NSTextField *caption = Label(NSLocalizedString(@"water_reminder_label", @""), 11, NSColor.whiteColor,
+                                 NSTextAlignmentCenter, NO);
+    caption.frame = NSMakeRect(textLeft, bubble.size.height / 2.0 - 6, textWidth, 16);
+    [view addSubview:caption];
+
+    NSTextField *time = Label(EBTimeLeftText((long)(seconds * 1000), EBRussianNow(), NO), 13, EBAmber(),
+                              NSTextAlignmentCenter, YES);
+    time.frame = NSMakeRect(textLeft, bubble.size.height / 2.0 - 28, textWidth, 20);
+    [view addSubview:time];
+
+    EBOverlayWindow *window = [self windowWithView:view onDisplay:0 capturesInput:NO];
+    [window setFrame:EBBottomRightRect(bubble.size, NSScreen.mainScreen.visibleFrame, 0) display:NO];
+    window.alphaValue = 1;
+    self.waterWnd = window;
+    [window orderFrontRegardless];
+    [self startSlowTimer];
+
+    if (EBTraceOn())
+        fprintf(stderr, "[EB] water reminder shown, %d ml, dismiss in %.0fs\n", ml, seconds);
+
+    __weak EBOverlayController *weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+                       [weakSelf hideWaterReminder];
+                   });
+}
+
+// The long-break countdown owns the same corner, and the two timers are unrelated: a 50 minute break
+// interval and a 30 minute water interval coincide often enough that one will replace the other.
+// Declining rather than stacking keeps the countdown visible, which is the notice that matters more.
+- (BOOL)showWaterReminderDeferred {
+    return self.countdownVisible;
+}
+
+- (void)hideWaterReminder {
+    if (self.waterWnd) {
+        [self.waterWnd orderOut:nil];
+        self.waterWnd = nil;
+    }
+}
+
 - (void)hideAll {
     [self restoreSuspendedApplication];
     [self hideNotification];
+    [self hideWaterReminder];
     [self teardown:_longBreakWnds];
     [self teardown:_longBreakDimWnds];
     [self teardown:_shortBreakWnds];

@@ -6,6 +6,10 @@
 static const int kBigPauseIntervals[] = { 20, 25, 30, 35, 40, 45, 50, 60, 90, 120 };
 static const int kBigPauseDurations[] = { 2, 3, 4, 5, 7, 10, 15, 20 };
 static const double kWarningDelays[] = { 20.0 / 60.0, 0.5, 1.0, 1.5 }; // 20s, 30s, 60s, 90s
+// Hydration lists, added in the port. Defined here rather than reused from ebcore.h so the popup and
+// the clamping logic can never disagree about what a valid value is; the test asserts the two match.
+static const int kWaterIntervalSteps[] = { 15, 20, 25, 30, 45, 60, 90, 120 };
+static const int kWaterVolumeSteps[] = { 50, 100, 150, 200, 250 };
 static const int kMiniPauseIntervals[] = { 5, 8, 10, 15, 20, 30 };
 static const int kMiniPauseDurations[] = { 8, 15, 20 };
 
@@ -20,7 +24,10 @@ static NSString *LocalizedListItem(NSString *keyFormat, int index) {
 @property(nonatomic) NSPopUpButton *warningButton;
 @property(nonatomic) NSPopUpButton *miniIntervalButton;
 @property(nonatomic) NSPopUpButton *miniDurationButton;
+@property(nonatomic) NSPopUpButton *waterIntervalButton;
+@property(nonatomic) NSPopUpButton *waterVolumeButton;
 @property(nonatomic) NSButton *bigEnabled;
+@property(nonatomic) NSButton *waterEnabled;
 @property(nonatomic) NSButton *miniEnabled;
 @property(nonatomic) NSButton *warningEnabled;
 @property(nonatomic) NSButton *sounds;
@@ -165,6 +172,23 @@ static NSString *LocalizedListItem(NSString *keyFormat, int index) {
                                              [self rowWith:@[ _miniIntervalButton, _miniDurationButton ]],
                                          ]];
 
+    _waterEnabled = [self checkbox:@"settings_water_reminder_label" target:self];
+    _waterIntervalButton = [self popupWithKeyFormat:@"settings_water_interval_value_%d"
+                                              count:(int)(sizeof(kWaterIntervalSteps) / sizeof(int))
+                                              target:self];
+    _waterVolumeButton = [self popupWithKeyFormat:@"settings_water_volume_value_%d"
+                                            count:(int)(sizeof(kWaterVolumeSteps) / sizeof(int))
+                                            target:self];
+
+    NSView *water = [self groupWithTitle:@"settings_water_group_label"
+                                    rows:@[
+                                        _waterEnabled,
+                                        [self rowWith:@[ [self caption:@"settings_water_interval_label"],
+                                                         _waterIntervalButton,
+                                                         [self caption:@"settings_water_volume_label"],
+                                                         _waterVolumeButton ]],
+                                    ]];
+
     _sounds = [self checkbox:@"settings_enable_sounds_label" target:self];
     _strictMode = [self checkbox:@"settings_enable_strict_mode_label" target:self];
     _windowNearby = [self checkbox:@"settings_have_window_nearby" target:self];
@@ -182,7 +206,8 @@ static NSString *LocalizedListItem(NSString *keyFormat, int index) {
                                             _startAtLogin,
                                         ]];
 
-    NSStackView *settingsTab = [NSStackView stackViewWithViews:@[ longBreak, shortBreak, behaviour ]];
+    NSStackView *settingsTab =
+        [NSStackView stackViewWithViews:@[ longBreak, shortBreak, water, behaviour ]];
     settingsTab.orientation = NSUserInterfaceLayoutOrientationVertical;
     settingsTab.alignment = NSLayoutAttributeLeading;
     settingsTab.spacing = 16;
@@ -304,6 +329,10 @@ static NSInteger EBIndexOfDouble(double value, const double *list, int count) {
     _inactivityTracking.state = s.inactivityTracking ? NSControlStateValueOn : NSControlStateValueOff;
     _showNotifications.state = s.showNotifications ? NSControlStateValueOn : NSControlStateValueOff;
     _miniFullscreen.state = s.miniPauseFullscreen ? NSControlStateValueOn : NSControlStateValueOff;
+    _waterEnabled.state = s.waterReminderEnabled ? NSControlStateValueOn : NSControlStateValueOff;
+
+    [_waterIntervalButton selectItemAtIndex:EBIndexOfInt(s.waterIntervalMin, kWaterIntervalSteps, (int)(sizeof(kWaterIntervalSteps) / sizeof(int)))];
+    [_waterVolumeButton selectItemAtIndex:EBIndexOfInt(s.waterVolumeMl, kWaterVolumeSteps, (int)(sizeof(kWaterVolumeSteps) / sizeof(int)))];
 
     [_bigIntervalButton selectItemAtIndex:EBIndexOfInt(s.bigPauseInterval, kBigPauseIntervals, (int)(sizeof(kBigPauseIntervals) / sizeof(int)))];
     [_bigDurationButton selectItemAtIndex:EBIndexOfInt(s.bigPauseDuration, kBigPauseDurations, (int)(sizeof(kBigPauseDurations) / sizeof(int)))];
@@ -324,12 +353,15 @@ static NSInteger EBIndexOfDouble(double value, const double *list, int count) {
     s.inactivityTracking = _inactivityTracking.state == NSControlStateValueOn;
     s.showNotifications = _showNotifications.state == NSControlStateValueOn;
     s.miniPauseFullscreen = _miniFullscreen.state == NSControlStateValueOn;
+    s.waterReminderEnabled = _waterEnabled.state == NSControlStateValueOn;
 
     s.bigPauseInterval = kBigPauseIntervals[_bigIntervalButton.indexOfSelectedItem];
     s.bigPauseDuration = kBigPauseDurations[_bigDurationButton.indexOfSelectedItem];
     s.warningInterval = kWarningDelays[_warningButton.indexOfSelectedItem];
     s.miniPauseInterval = kMiniPauseIntervals[_miniIntervalButton.indexOfSelectedItem];
     s.miniPauseDuration = kMiniPauseDurations[_miniDurationButton.indexOfSelectedItem];
+    s.waterIntervalMin = kWaterIntervalSteps[_waterIntervalButton.indexOfSelectedItem];
+    s.waterVolumeMl = kWaterVolumeSteps[_waterVolumeButton.indexOfSelectedItem];
     return s;
 }
 
@@ -344,6 +376,8 @@ static NSInteger EBIndexOfDouble(double value, const double *list, int count) {
     _warningButton.enabled = _warningEnabled.state == NSControlStateValueOn;
     _miniIntervalButton.enabled = _miniEnabled.state == NSControlStateValueOn;
     _miniDurationButton.enabled = _miniEnabled.state == NSControlStateValueOn;
+    _waterIntervalButton.enabled = _waterEnabled.state == NSControlStateValueOn;
+    _waterVolumeButton.enabled = _waterEnabled.state == NSControlStateValueOn;
 }
 
 #pragma mark - Actions

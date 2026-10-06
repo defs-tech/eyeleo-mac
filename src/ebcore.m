@@ -131,6 +131,20 @@ static int ReadInt(CFDictionaryRef root, CFStringRef section, CFStringRef key, i
 }
 
 static bool ReadBool(CFDictionaryRef root, CFStringRef section, CFStringRef key, bool fallback) {
+    // CFBoolean is not a CFNumber, though both are CFPropertyList primitives. The app writes its own
+    // booleans as 0/1 so this never bit us, but anything that edits the file properly -- defaults,
+    // PlistBuddy, an XML plist -- stores <true/>/<false/>, and those values were being read as absent
+    // and silently replaced by the default. A checkbox turned off that springs back on is a baffling
+    // bug to chase, so both encodings are accepted.
+    CFDictionaryRef sec = NULL;
+    if (root && CFGetTypeID(root) == CFDictionaryGetTypeID()) {
+        sec = (CFDictionaryRef)CFDictionaryGetValue(root, section);
+        if (sec && CFGetTypeID(sec) == CFDictionaryGetTypeID()) {
+            CFTypeRef v = (CFTypeRef)CFDictionaryGetValue(sec, key);
+            if (v && CFGetTypeID(v) == CFBooleanGetTypeID())
+                return CFBooleanGetValue((CFBooleanRef)v) ? true : false;
+        }
+    }
     return ReadInt(root, section, key, fallback ? 1 : 0) != 0;
 }
 
@@ -167,6 +181,7 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
 @end
 
 @implementation EBCore {
+    long _timeLeftToWaterMs;
     EBState _currentState;
     long _tickIntervalMs;
     long _relaxingTimeLeft;
@@ -215,6 +230,9 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
     s.inactivityTracking = YES;
     s.showNotifications = YES;
     s.miniPauseFullscreen = NO;
+    s.waterReminderEnabled = YES;
+    s.waterIntervalMin = EBWaterIntervalDefaultMin;
+    s.waterVolumeMl = EBWaterVolumeDefaultMl;
     return s;
 }
 
@@ -234,7 +252,33 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
         s.warningInterval = EBWarningIntervalMinMin;
     if (s.miniPauseInterval < EBMiniPauseIntervalMinMin)
         s.miniPauseInterval = EBMiniPauseIntervalMinMin;
+    s.waterIntervalMin = [self snapToList:kWaterIntervalsMin
+                               count:(int)(sizeof(kWaterIntervalsMin) / sizeof(int))
+                               value:s.waterIntervalMin];
+    s.waterVolumeMl = [self snapToList:kWaterVolumesMl
+                          count:(int)(sizeof(kWaterVolumesMl) / sizeof(int))
+                          value:s.waterVolumeMl];
     return s;
+}
+
+// Pulls a value onto one of the entries the settings popup offers. Snapping rather than clamping to a
+// numeric range is what keeps the stored value and the popup in agreement: EBIndexOfInt answers 0 for
+// anything it does not recognise, so an off-list value would silently display the first item while
+// the app kept using the value the user never picked.
+- (int)snapToList:(const int *)list count:(int)count value:(int)value {
+    for (int i = 0; i < count; i++)
+        if (list[i] == value)
+            return value;
+    int nearest = list[0];
+    int bestDistance = abs(list[0] - value);
+    for (int i = 1; i < count; i++) {
+        int distance = abs(list[i] - value);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            nearest = list[i];
+        }
+    }
+    return nearest;
 }
 
 #pragma mark - Settings
@@ -253,6 +297,7 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
     CFStringRef sounds = CFSTR("sounds"), strict = CFSTR("strict_mode"), nearby = CFSTR("window_nearby");
     CFStringRef closeable = CFSTR("can_close_notifications"), inactivity = CFSTR("inactivity_tracking");
     CFStringRef showNotif = CFSTR("show_notifications"), miniFs = CFSTR("mini_pause_fullscreen");
+    CFStringRef water = CFSTR("water");
     CFStringRef stats = CFSTR("statistics");
     CFStringRef enabled = CFSTR("enabled"), interval = CFSTR("interval"), duration = CFSTR("duration");
 
@@ -272,6 +317,9 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
     s.inactivityTracking = ReadBool(r, inactivity, enabled, s.inactivityTracking);
     s.showNotifications = ReadBool(r, showNotif, enabled, s.showNotifications);
     s.miniPauseFullscreen = ReadBool(r, miniFs, enabled, s.miniPauseFullscreen);
+    s.waterReminderEnabled = ReadBool(r, water, enabled, s.waterReminderEnabled);
+    s.waterIntervalMin = ReadInt(r, water, CFSTR("interval"), s.waterIntervalMin);
+    s.waterVolumeMl = ReadInt(r, water, CFSTR("volume"), s.waterVolumeMl);
 
     // Corrections the original applies for old versions, from EyeApp::LoadSettings.
     if (s.miniPauseInterval < EBMiniPauseIntervalMinMin)
@@ -279,6 +327,10 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
     if (s.miniPauseDuration == 0)
         s.miniPauseDuration = 8;
     _settings = [self clampSettings:s];
+
+    if (EBTraceOn())
+        fprintf(stderr, "[EB] water settings: enabled=%d interval=%dmin volume=%dml\n",
+                _settings.waterReminderEnabled, _settings.waterIntervalMin, _settings.waterVolumeMl);
 
     EBStats st = _stats;
     st.firstLaunch = ReadBool(r, stats, CFSTR("first_launch"), YES);
@@ -313,6 +365,7 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
     CFStringRef sounds = CFSTR("sounds"), strict = CFSTR("strict_mode"), nearby = CFSTR("window_nearby");
     CFStringRef closeable = CFSTR("can_close_notifications"), inactivity = CFSTR("inactivity_tracking");
     CFStringRef showNotif = CFSTR("show_notifications"), miniFs = CFSTR("mini_pause_fullscreen");
+    CFStringRef water = CFSTR("water");
     CFStringRef enabled = CFSTR("enabled"), interval = CFSTR("interval"), duration = CFSTR("duration");
 
     PutBool(root, big, enabled, s.bigPauseEnabled);
@@ -330,6 +383,9 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
     PutBool(root, inactivity, enabled, s.inactivityTracking);
     PutBool(root, showNotif, enabled, s.showNotifications);
     PutBool(root, miniFs, enabled, s.miniPauseFullscreen);
+    PutBool(root, water, enabled, s.waterReminderEnabled);
+    PutInt(root, water, CFSTR("interval"), s.waterIntervalMin);
+    PutInt(root, water, CFSTR("volume"), s.waterVolumeMl);
 
     CFStringRef stats = CFSTR("statistics");
     PutBool(root, stats, CFSTR("first_launch"), _stats.firstLaunch);
@@ -414,6 +470,13 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
     self.timeLeftToMiniPause = _settings.miniPauseEnabled ? (long)_settings.miniPauseInterval * 1000 * 60 : 0;
 }
 
+// Not persisted, unlike the break intervals. A hydration reminder is not worth coming back to after
+// a restart: the first one fires a full interval after launch, which is close enough, and not writing
+// it keeps the reminder from outliving the session that asked for it.
+- (void)restartWaterInterval {
+    _timeLeftToWaterMs = (long)_settings.waterIntervalMin * 60 * 1000;
+}
+
 - (void)setBigPauseTime:(long)ms {
     _postponeCount = 0;
     _inactivityTime = 0;
@@ -432,6 +495,7 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
     _stats.firstLaunch = firstLaunch;
     _stats.lastShutdown = lastShutdown;
     [self restartMiniPauseInterval];
+    [self restartWaterInterval];
 
     if (firstLaunch) {
         [self changeState:EBStateFirstLaunch interval:1000];
@@ -509,7 +573,10 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
     } break;
 
     case EBStateIdle: {
-        if (_settings.bigPauseEnabled || _settings.miniPauseEnabled) {
+        // The hydration reminder counts as a reason to stay awake. Without it, switching off both
+        // break types suspended the app and the reminder -- which has its own checkbox and its own
+        // settings -- silently stopped working, which is not what that checkbox promises.
+        if (_settings.bigPauseEnabled || _settings.miniPauseEnabled || _settings.waterReminderEnabled) {
             [self repeatState];
 
             if (_settings.inactivityTracking && _inactivityTime >= EBAutoRelaxAfterMs) {
@@ -555,6 +622,30 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
                     [d presentShortBreakShowCount:_stats.shortBreakCount
                                        fullscreen:_settings.miniPauseFullscreen];
                     [self saveSettings];
+                }
+            }
+
+            // Hydration reminder. Counts working time only: it is decremented here, inside the idle
+            // branch, so a break or a suspended session pauses it rather than letting reminders pile
+            // up against someone who was away from the desk. Not accelerated by fast mode either --
+            // fast mode exists to exercise the break cycle, and this is not part of it.
+            if (_settings.waterReminderEnabled) {
+                if (_timeLeftToWaterMs > 0)
+                    _timeLeftToWaterMs -= msElapsed;
+                if (EBTraceOn() && _timeLeftToWaterMs < 120000)
+                    fprintf(stderr, "[EB] water: %ld ms left\n", _timeLeftToWaterMs);
+
+                if (_timeLeftToWaterMs <= 0) {
+                    // The long-break countdown holds the same corner of the screen. Retrying a minute
+                    // later rather than stacking keeps the countdown, which is the more important of
+                    // the two notices, visible.
+                    if ([d waterReminderDeferred]) {
+                        _timeLeftToWaterMs = 60 * 1000;
+                    } else {
+                        _timeLeftToWaterMs = (long)_settings.waterIntervalMin * 60 * 1000;
+                        [d presentWaterReminderWithVolumeMl:_settings.waterVolumeMl
+                                                     seconds:EBWaterReminderSec];
+                    }
                 }
             }
         } else {

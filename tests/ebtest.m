@@ -54,6 +54,11 @@ static void CheckEq(long got, long want, NSString *what) {
 @property(nonatomic) int nDismissWaiting;
 @property(nonatomic) int nPresentShortBreak;
 @property(nonatomic) int nDismissShortBreak;
+@property(nonatomic) int nPresentWater;
+@property(nonatomic) int nLastWaterMl;
+@property(nonatomic) int nLastWaterSec;
+// Set by the test to simulate the long-break countdown owning the bottom-right corner.
+@property(nonatomic) BOOL waterDeferred;
 @property(nonatomic) int nSoundCount;
 @property(nonatomic) int nTerminateCount;
 @property(nonatomic) long nLastCountdownMs;
@@ -127,6 +132,16 @@ static void CheckEq(long got, long want, NSString *what) {
     _nPresentShortBreak++;
     _nLastShortBreakCount = showCount;
     _nLastShortBreakFullscreen = fullscreen;
+}
+
+- (void)presentWaterReminderWithVolumeMl:(int)ml seconds:(int)seconds {
+    _nPresentWater++;
+    _nLastWaterMl = ml;
+    _nLastWaterSec = seconds;
+}
+
+- (BOOL)waterReminderDeferred {
+    return _waterDeferred;
 }
 
 - (void)dismissShortBreak {
@@ -434,6 +449,9 @@ static void TestBothBreaksDisabled(void) {
     EBSettings off = core.settings;
     off.bigPauseEnabled = NO;
     off.miniPauseEnabled = NO;
+    // The hydration reminder counts as scheduled work: it has its own checkbox, so leaving it on means
+    // the user asked for something to keep happening. Covered separately in the reminder test.
+    off.waterReminderEnabled = NO;
     core.settings = off;
     [core tickWithElapsedMs:1000];
     Check(core.nextState == EBStateSuspended, @"suspends when nothing is scheduled");
@@ -490,6 +508,46 @@ static void TestResumeAcrossRestart(void) {
     CheckEq(core.timeLeftToBigPause, 50LL * 60 * 1000, @"long absence restarts the interval");
 }
 
+// A plist written by any tool that understands the format stores <true/>/<false/>, which is a
+// CFBoolean and not a CFNumber. Reading only CFNumber made every such value look absent and fall back
+// to the default, so a checkbox turned off in the file sprang back on in the app.
+static void TestBooleansFromAnyPlistWriter(void) {
+    printf("booleans written as true/false\n");
+    NSString *domain = @"local.eyeleo.EyeLeoTestsBooleans";
+    NSString *path = [NSHomeDirectory() stringByAppendingPathComponent:
+        [NSString stringWithFormat:@"Library/Preferences/%@.plist", domain]];
+
+    NSDictionary *stored = @{
+        @"eyeleo": @{
+            @"sounds": @{ @"enabled": @NO },
+            @"strict_mode": @{ @"enabled": @YES },
+            // A number where the app writes a number, to prove both encodings work side by side.
+            @"mini_pause_fullscreen": @{ @"enabled": @0 },
+            @"window_nearby": @{ @"enabled": @1 },
+        }
+    };
+    NSData *xml = [NSPropertyListSerialization dataWithPropertyList:stored
+                                                             format:NSPropertyListXMLFormat_v1_0
+                                                            options:0
+                                                              error:NULL];
+    [xml writeToFile:path atomically:YES];
+
+    // CFPreferences caches per domain, so the freshly written file has to be registered with it
+    // rather than merely sitting on disk.
+    CFPreferencesSetAppValue((__bridge CFStringRef)@"eyeleo",
+                             (__bridge CFPropertyListRef)stored[ @"eyeleo" ],
+                             (__bridge CFStringRef)domain);
+    CFPreferencesAppSynchronize((__bridge CFStringRef)domain);
+
+    EBCore *core = [[EBCore alloc] init];
+    core.preferencesDomain = domain;
+    Check([core loadSettings], @"loaded a plist written by another writer");
+    Check(!core.settings.soundsEnabled, @"a false written as <false/> reads as false, not the default true");
+    Check(core.settings.strictModeEnabled, @"a true written as <true/> reads as true");
+    Check(!core.settings.miniPauseFullscreen, @"a 0 still reads as false");
+    Check(core.settings.windowNearby, @"a 1 still reads as true");
+}
+
 static void TestPersistRoundTrip(void) {
     printf("settings round-trip\n");
     NSString *domain = @"local.eyeleo.EyeLeoTestsRoundTrip";
@@ -507,6 +565,9 @@ static void TestPersistRoundTrip(void) {
     s.canCloseNotifications = YES;
     s.showNotifications = NO;
     s.miniPauseFullscreen = YES;
+    s.waterReminderEnabled = NO;
+    s.waterIntervalMin = 45;
+    s.waterVolumeMl = 150;
     core.settings = s;
     EBStats seededStats = core.stats;
     seededStats.longBreakCount = 12;
@@ -524,6 +585,9 @@ static void TestPersistRoundTrip(void) {
     Check(reloaded.settings.canCloseNotifications, @"closeable notifications persisted");
     Check(!reloaded.settings.showNotifications, @"show notifications persisted");
     Check(reloaded.settings.miniPauseFullscreen, @"mini pause fullscreen persisted");
+    Check(!reloaded.settings.waterReminderEnabled, @"water reminder persisted as off");
+    CheckEq(reloaded.settings.waterIntervalMin, 45, @"water interval persisted");
+    CheckEq(reloaded.settings.waterVolumeMl, 150, @"water portion persisted");
     CheckEq(reloaded.stats.longBreakCount, 12, @"long break count persisted");
     CheckEq(reloaded.stats.shortBreakCount, 34, @"short break count persisted");
 }
@@ -580,6 +644,112 @@ static void TestWarningInterval(void) {
     Check(EBWarningIntervalMinMin * 60 * 1000 > EBLongBreakConfirmationSec * 1000,
           @"warning floor leaves room for the confirmation countdown");
     Check(EBWarningIntervalMinMin * 60 == 20, @"warning floor is 20 seconds");
+}
+
+static void TestWaterReminder(void) {
+    printf("hydration reminder\n");
+
+    // Defaults: on, 30 minutes, 100 ml. The total is 200 ml/hour delivered as two sips rather than
+    // one 200 ml glass.
+    EBCore *fresh = MakeCore(NULL);
+    EBSettings d = fresh.defaultSettings;
+    Check(d.waterReminderEnabled, @"water reminder is on by default");
+    Check(d.waterIntervalMin == EBWaterIntervalDefaultMin, @"default interval is 30 minutes");
+    Check(d.waterVolumeMl == EBWaterVolumeDefaultMl, @"default portion is 100 ml");
+    Check(60 / d.waterIntervalMin * d.waterVolumeMl == 200, @"default total is 200 ml/hour");
+
+    // The interval list carries 25 minutes, which the owner asked for explicitly.
+    int intervals = (int)(sizeof(kWaterIntervalsMin) / sizeof(int));
+    Check(intervals == 8, @"eight interval steps");
+    BOOL has25 = NO;
+    for (int i = 0; i < intervals; i++)
+        if (kWaterIntervalsMin[i] == 25)
+            has25 = YES;
+    Check(has25, @"25 minutes is an offered interval");
+
+    // Every interval and volume the popup offers must survive clamping untouched, otherwise the
+    // stored value and the displayed item drift apart.
+    EBCore *core = MakeCore(NULL);
+    int bad = 0;
+    for (int i = 0; i < intervals; i++)
+        for (int v = 0; v < (int)(sizeof(kWaterVolumesMl) / sizeof(int)); v++) {
+            EBSettings s = core.settings;
+            s.waterIntervalMin = kWaterIntervalsMin[i];
+            s.waterVolumeMl = kWaterVolumesMl[v];
+            EBSettings c = [core clampSettings:s];
+            if (c.waterIntervalMin != kWaterIntervalsMin[i] || c.waterVolumeMl != kWaterVolumesMl[v])
+                bad++;
+        }
+    Check(bad == 0, @"every offered interval and portion survives clamping");
+
+    // Off-list values snap to the nearest offered one instead of being clamped to a numeric range:
+    // EBIndexOfInt answers 0 for anything it does not know, which would display the first item while
+    // the app kept using a value the user never picked.
+    EBSettings s = core.settings;
+    s.waterIntervalMin = 37;
+    Check([core clampSettings:s].waterIntervalMin == 30, @"37 minutes snaps to the nearest offered, 30");
+    s.waterIntervalMin = 1000;
+    Check([core clampSettings:s].waterIntervalMin == 120, @"1000 minutes snaps to the largest offered, 120");
+    s.waterVolumeMl = 0;
+    Check([core clampSettings:s].waterVolumeMl == 50, @"0 ml snaps to the smallest offered, 50");
+
+    // Safety ceiling. NIOSH warns above 1414 ml/hour, where water intoxication becomes a risk; no
+    // combination of offered settings may reach it.
+    int worstMl = 0;
+    for (int i = 0; i < intervals; i++) {
+        for (int v = 0; v < (int)(sizeof(kWaterVolumesMl) / sizeof(int)); v++) {
+            int ml = 60 / kWaterIntervalsMin[i] * kWaterVolumesMl[v];
+            if (ml > worstMl)
+                worstMl = ml;
+        }
+    }
+    Check(worstMl == 1000, @"worst offered combination is 1000 ml/hour");
+    Check(worstMl < 1414, @"no settings combination reaches the 1414 ml/hour ceiling");
+
+    // The reminder fires from the idle branch, so it must not present while a countdown owns the
+    // corner. The core retries a minute later rather than stacking the two bubbles.
+    Recorder *rec = nil;
+    EBCore *c2 = MakeCore(&rec);
+    EBSettings fast = c2.defaultSettings;
+    fast.bigPauseEnabled = NO;
+    fast.miniPauseEnabled = NO;
+    fast.waterReminderEnabled = YES;
+    fast.waterIntervalMin = 15;
+    c2.settings = fast;
+    [c2 startWithFirstLaunch:NO lastShutdown:0];
+
+    // Drive the interval out in 1 s steps, which is what the scheduler actually does. Passing
+    // tickWithElapsedMs:900000 in one call would not exercise the countdown at all.
+    rec.waterDeferred = YES;
+    for (int i = 0; i < 15 * 60; i++)
+        [c2 tickWithElapsedMs:1000];
+    Check(rec.nPresentWater == 0, @"no reminder while the countdown holds the corner");
+
+    // Deferred, so the retry is a minute out rather than a full interval later.
+    rec.waterDeferred = NO;
+    for (int i = 0; i < 61; i++)
+        [c2 tickWithElapsedMs:1000];
+    Check(rec.nPresentWater == 1, @"reminder appears once the corner is free");
+    Check(rec.nLastWaterMl == fast.waterVolumeMl, @"reminder carries the configured portion");
+    Check(rec.nLastWaterSec == EBWaterReminderSec, @"reminder uses the configured auto-dismiss");
+
+    // The next reminder comes a full interval later, not on the next tick.
+    [c2 tickWithElapsedMs:1000];
+    Check(rec.nPresentWater == 1, @"no immediate repeat after showing");
+    for (int i = 0; i < 14 * 60; i++)
+        [c2 tickWithElapsedMs:1000];
+    Check(rec.nPresentWater == 1, @"still quiet just before the interval elapses");
+    for (int i = 0; i < 2 * 60; i++)
+        [c2 tickWithElapsedMs:1000];
+    Check(rec.nPresentWater == 2, @"next reminder after a full interval");
+
+    // Switching the reminder off must stop it.
+    EBSettings off = c2.settings;
+    off.waterReminderEnabled = NO;
+    c2.settings = off;
+    for (int i = 0; i < 60 * 60; i++)
+        [c2 tickWithElapsedMs:1000];
+    Check(rec.nPresentWater == 2, @"a disabled reminder stays silent");
 }
 
 static void TestGeometry(void) {
@@ -652,6 +822,7 @@ int main(void) {
     @autoreleasepool {
         printf("EyeLeo macOS core tests\n\n");
         TestWarningInterval();
+        TestWaterReminder();
         TestGeometry();
         TestPlurals();
         TestTimeSpec();
@@ -668,6 +839,7 @@ int main(void) {
         TestBothBreaksDisabled();
         TestCountdownAvoidsFullscreenDisplay();
         TestResumeAcrossRestart();
+        TestBooleansFromAnyPlistWriter();
         TestPersistRoundTrip();
         TestOverLimitSettingsClampedOnSave();
         TestDemoBreakLength();

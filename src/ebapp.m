@@ -457,6 +457,14 @@ static NSString *const kBundleID = @"local.eyeleo.EyeLeo";
     [_overlays hideCountdownAnimated:YES];
 }
 
+- (void)presentWaterReminderWithVolumeMl:(int)ml seconds:(int)seconds {
+    [_overlays showWaterReminderWithVolumeMl:ml seconds:seconds];
+}
+
+- (BOOL)waterReminderDeferred {
+    return [_overlays showWaterReminderDeferred];
+}
+
 - (void)presentBeforeBreak {
     [_overlays showBeforeBreakOnDisplay:0];
 }
