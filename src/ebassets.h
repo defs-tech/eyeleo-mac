@@ -20,12 +20,43 @@ typedef NS_ENUM(int, EBPersonageFrame) {
     EBFrameLookDown,
     EBFrameBlink,
     EBFrameCloseTightly,
-    EBFrameShoulders,  // head-and-shoulders bust, used by the neck and shoulders exercise
+    // The neck and shoulders exercise: two drawn frames, swapped. Replacing an earlier version that
+    // moved a baked picture with a transform.
+    EBFrameShouldersUp,
+    EBFrameShouldersDown,
+    // The full-figure stretch for the long break. Three frames, cycled; they were generated at
+    // different scales and aligned by tools/mkframes.m before they were checked in.
+    EBFrameStretchNeutral,
+    EBFrameStretchLeft,
+    EBFrameStretchRight,
+    // The head-and-shoulders crop for the short break's "stretch" exercise: arms down, arms up, and a
+    // backward bend. Three frames, cycled.
+    EBFrameStretchUpNeutral,
+    EBFrameStretchUp,
+    EBFrameStretchUpper,
+    // The palming exercise: eyes open, then covered by both paws. Two frames, cycled.
+    EBFrameEyesOpen,
+    EBFrameEyesClosed,
 };
 
 // How many personage frames exist. personage: and purgePersonage index their name array with the raw
 // enum value, and that array is sized by this constant, so the enum and the array cannot drift apart.
-enum { EBNumPersonageFrames = 8 };
+enum { EBNumPersonageFrames = 17 };
+
+// What is being drunk. Each has its own glass, so the reminder shows the cup and not a generic icon.
+typedef NS_ENUM(int, EBDrinkKind) {
+    EBDrinkNone = 0,
+    EBDrinkGreen,   // green tea
+    EBDrinkWhite,   // white tea
+    EBDrinkOolong,
+    EBDrinkBlack,
+    EBDrinkPuer,
+    EBDrinkHerbal,
+    EBDrinkWater,   // the hydration reminder, not tea
+};
+
+// How many kinds exist, counting the water. drinkImage: indexes its array with the raw value.
+enum { EBNumDrinks = 7 };
 
 @interface EBAssets : NSObject
 
@@ -39,15 +70,17 @@ enum { EBNumPersonageFrames = 8 };
 - (nullable NSImage *)noticeLeopard; // notification_leopard.png
 - (nullable NSImage *)personage:(EBPersonageFrame)frame;
 
-// The two halves of the neck and shoulders exercise, 156x46 and 90x57. Kept apart on purpose: baked
-// into one image, the head moves with the torso and the result reads as a sliding picture rather than
-// a stretch. Both come out of tools/mkpersonage.m, the head from the app's own artwork.
-- (nullable NSImage *)shouldersTorso;
-- (nullable NSImage *)shouldersHead;
+// The glass for a drink, at 71x44 pt. Seven separate vessels rather than one tinted, because the shapes
+// are the point: a tall faceted water glass and a wide shallow one tell you apart at a glance.
+- (nullable NSImage *)drinkImage:(EBDrinkKind)drink;
 
 // Drops the personage frames. Called when a break ends; the common case holds none at all,
 // because short breaks are the only consumer.
 - (void)purgePersonage;
+
+// Drops the glass bitmaps. Called when the reminder closes; seven vessels are small but there is no
+// reason to hold them between drinks either.
+- (void)purgeDrinks;
 
 @end
 

@@ -171,8 +171,11 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
 @property(nonatomic, strong, nullable) EBOverlayWindow *notificationWindow;
 @property(nonatomic, strong, nullable) EBOverlayWindow *waterWnd;
 @property(nonatomic, strong, nullable) NSImageView *longArt;
-@property(nonatomic, strong, nullable) NSImageView *shortHead;
 @property(nonatomic, strong, nullable) NSTextField *waterTime;
+@property(nonatomic, strong, nullable) EBOverlayWindow *teaWnd;
+@property(nonatomic, strong, nullable) NSTextField *teaCaption;
+@property(nonatomic, strong, nullable) NSTextField *teaTime;
+@property(nonatomic) NSUInteger teaDismissToken;
 @property(nonatomic) long waterMsLeft;
 
 @property(nonatomic, strong, nullable) NSTextField *longClock;
@@ -201,7 +204,8 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
 @property(nonatomic, strong, nullable) NSRunningApplication *suspendedApplication;
 
 @property(nonatomic) long longBreakMsLeft;
-@property(nonatomic) int longSwayPhase;
+@property(nonatomic) int longStretchPhase;
+@property(nonatomic) int longStretchTick;
 @property(nonatomic) long shortBreakMsLeft;
 @property(nonatomic) long countdownMsLeft;
 @property(nonatomic) int beforeReadySeconds;
@@ -209,7 +213,7 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
 
 - (void)fastTick;
 - (void)slowTick;
-- (void)stepLongBreakSway;
+- (void)stepLongBreakStretch;
 - (void)startFastTimer;
 - (void)startSlowTimer;
 - (void)stopFastTimer;
@@ -240,26 +244,6 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
 @implementation EBFadeJob
 @end
 
-// How far the head layer overlaps the top of the torso in the neck and shoulders exercise. Must match
-// kTorsoHeadGap in tools/mkpersonage.m, which draws the previews from the same numbers.
-//
-// Sixteen, not five. The head's own neck stub is only about 11 px wide, so at a shallow overlap it stood
-// out against the narrower top of the torso and the head read as floating above the shoulders. Sunk this
-// deep the stub is entirely inside the torso and the junction disappears. The lift is 2.5 pt, so there is
-// still 13 pt of head-over-torso cover at the top of the cycle.
-static const CGFloat EBNeckOverlapPt = 16.0;
-
-static void DrawWaterGlass(CGFloat w, CGFloat h);
-
-@interface EBWaterGlassView : NSView
-@end
-
-@implementation EBWaterGlassView
-- (void)drawRect:(NSRect)dirty {
-    DrawWaterGlass(NSWidth(self.bounds), NSHeight(self.bounds));
-}
-@end
-
 @implementation EBOverlayController
 
 - (instancetype)init {
@@ -282,42 +266,6 @@ static void DrawWaterGlass(CGFloat w, CGFloat h);
         dispatch_source_cancel(_slowTimer);
     if (_fadeTimer)
         dispatch_source_cancel(_fadeTimer);
-}
-
-// The hydration glass, drawn rather than shipped as art. It sits alone in the bubble with no leopard
-// next to it, so a flat render cannot clash with the painted portrait the way a mismatched raster
-// would, and it stays editable instead of being a binary blob. 71x44 matches notification_leopard.png,
-// the slot this art replaces.
-static void DrawWaterGlass(CGFloat w, CGFloat h) {
-    CGFloat glassW = w * 0.46, glassH = h * 0.72;
-    CGFloat glassX = (w - glassW) / 2.0, glassY = (h - glassH) / 2.0;
-
-    NSBezierPath *glass = [NSBezierPath bezierPathWithRoundedRect:NSMakeRect(glassX, glassY, glassW, glassH)
-                                                          xRadius:3
-                                                          yRadius:3];
-    glass.lineWidth = 1.5;
-    [[NSColor colorWithSRGBRed:0.72 green:0.85 blue:0.95 alpha:0.55] setStroke];
-    [glass stroke];
-
-    // Water at three quarters, with a flat surface and a lighter meniscus, so it reads as a liquid
-    // rather than as a filled rectangle.
-    NSRect waterRect = NSMakeRect(glassX + 2, glassY + 2, glassW - 4, glassH * 0.62);
-    NSBezierPath *water = [NSBezierPath bezierPathWithRoundedRect:waterRect xRadius:2 yRadius:2];
-    [[NSColor colorWithSRGBRed:0.26 green:0.60 blue:0.85 alpha:0.85] setFill];
-    [water fill];
-
-    NSBezierPath *surface = [NSBezierPath bezierPathWithOvalInRect:
-        NSMakeRect(glassX + 2, glassY + 2 + glassH * 0.62 - 2, glassW - 4, 4)];
-    [[NSColor colorWithSRGBRed:0.62 green:0.86 blue:0.96 alpha:0.9] setFill];
-    [surface fill];
-
-    // One highlight down the left side.
-    NSBezierPath *shine = [NSBezierPath bezierPathWithRoundedRect:
-        NSMakeRect(glassX + 5, glassY + 7, 2.5, glassH - 16)
-                                                       xRadius:1.25
-                                                       yRadius:1.25];
-    [[NSColor colorWithWhite:1 alpha:0.35] setFill];
-    [shine fill];
 }
 
 - (BOOL)countdownVisible {
@@ -507,21 +455,11 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
 - (void)fastTick {
     if (self.shortBreakMsLeft > 0) {
         [self.animation advance];
+        // Every animated exercise swaps its artwork now, so this is a straight image assignment. The
+        // transform is still applied because it is part of the animation interface, and because it is
+        // identity for every exercise that exists.
         self.shortImage.image = self.animation.image;
         self.shortImage.layer.transform = self.animation.transform;
-        // The artwork is a subview, so its transform is invisible to CGWindowList: the probe reports
-        // the window frame, which never moves. The value is traced here instead, which is the only
-        // place it can actually be observed.
-        if (self.shortHead)
-            self.shortHead.layer.transform = self.animation.headTransform;
-        if (EBTraceOn() && self.animation.exercise == EBExerciseNeckShoulders) {
-            // acos, not asin: for a Z rotation CATransform3D stores cos in m11. Recovering the angle
-            // with asin reported 1.571 rad, that is 90 degrees, for a rotation of zero.
-            float m11 = self.animation.headTransform.m11;
-            m11 = m11 > 1.0f ? 1.0f : (m11 < -1.0f ? -1.0f : m11);
-            fprintf(stderr, "[EB] shoulder lift %.2f pt, head tilt %.3f rad\n",
-                    self.animation.transform.m42, acos(m11));
-        }
         self.shortBreakMsLeft -= 100;
         self.shortTime.stringValue = EBTimeLeftText(MAX(self.shortBreakMsLeft, 0), EBRussianNow(), NO);
         if (self.shortBreakMsLeft <= 0)
@@ -545,7 +483,7 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
     }
 
     if (self.longArt)
-        [self stepLongBreakSway];
+        [self stepLongBreakStretch];
 
     if (self.waterTime) {
         self.waterMsLeft -= 1000;
@@ -590,14 +528,20 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
 // each side is far slower than the short break's motion on purpose: this runs for minutes, not
 // seconds, and anything quicker reads as a twitch. The anchor point is the bottom of the frame so the
 // figure leans from the hips instead of pivoting around its own middle.
-- (void)stepLongBreakSway {
-    static const double kLean[4] = { 0.0, 1.0, 0.0, -1.0 };
-    self.longSwayPhase = (self.longSwayPhase + 1) % 4;
-    double lean = kLean[self.longSwayPhase];
-    float radians = (float)(lean * 0.045);
-    self.longArt.layer.transform = CATransform3DMakeRotation(radians, 0, 0, 1);
+// The long break cycles through three drawn poses instead of tilting one picture: a standing figure,
+// a lean to the left with the right arm up, and a lean to the right with the left arm up. Frames rather
+// than a transform, because a rotated single image read as a sliding picture rather than as a body.
+- (void)stepLongBreakStretch {
+    static const EBPersonageFrame kOrder[4] = { EBFrameStretchNeutral, EBFrameStretchLeft,
+                                                EBFrameStretchNeutral, EBFrameStretchRight };
+    // Two ticks per pose, so a phase lasts two seconds. A stretch is meant to be unhurried, and at one
+    // second the leopard read as fidgeting rather than holding the position.
+    if ((self.longStretchTick++ % 2) != 0)
+        return;
+    self.longStretchPhase = (self.longStretchPhase + 1) % 4;
+    self.longArt.image = [EBAssets.shared personage:kOrder[self.longStretchPhase]];
     if (EBTraceOn())
-        fprintf(stderr, "[EB] long break lean %.3f rad\n", radians);
+        fprintf(stderr, "[EB] long break frame %d\n", self.longStretchPhase);
 }
 
 - (void)showLongBreakWithSeconds:(int)seconds {
@@ -629,26 +573,41 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
                 [view addSubview:title];
             }
 
-            // The bust rather than the bare head: the long break was the one screen with no motion at
-            // all, and a five minute break justifies showing shoulders. Generating a full-body figure
-            // was attempted and produced an unusable quadruped, so the same baked bust as the neck
-            // exercise is reused and moved in code -- one image, so the markings cannot drift.
-            NSImage *leopard = [EBAssets.shared personage:EBFrameShoulders];
+            // The full figure rather than a bust: the long break is the one screen that justifies it,
+            // and a five minute break is long enough to show a stretch rather than just a head.
+            NSImage *leopard = [EBAssets.shared personage:EBFrameStretchNeutral];
             if (!leopard)
                 leopard = [EBAssets.shared personage:EBFrameDefault];
             if (leopard) {
-                CGFloat artH = leopard.size.height * 1.6;
-                CGFloat artW = leopard.size.width * 1.6;
+                // No scale factor here. The stretch frames are drawn at the height this screen can give
+                // them, and personage: has already halved them from their stored pixel size to points.
+                // The bust this replaced was 98px tall and was multiplied by 1.6; carrying that over to a
+                // 348pt figure made it 557pt, which reached past the Dock and off the bottom.
+                //
+                // Capped against the screen as well. The figure starts 200pt from the top and the tip, the
+                // clock and the Skip button need about 250pt below it, so on a short display an uncapped
+                // 348pt figure would push the Skip button off the bottom edge.
+                CGFloat artH = leopard.size.height;
+                CGFloat artW = leopard.size.width;
+                CGFloat room = NSHeight(view.frame) - 200 - 250;
+                if (artH > room) {
+                    artW *= room / artH;
+                    artH = room;
+                }
+                if (artH < 40) {
+                    artH = 40;
+                    artW = leopard.size.width * 40.0 / leopard.size.height;
+                }
                 NSImageView *portrait =
                     [[NSImageView alloc] initWithFrame:NSMakeRect(centreX - artW / 2.0,
                                                                   cursorY - artH, artW, artH)];
                 portrait.image = leopard;
-                portrait.wantsLayer = YES;
-                // Pivot at the bottom of the frame, so the figure leans rather than spinning in place.
-                portrait.layer.anchorPoint = CGPointMake(0.5, 0.0);
                 [view addSubview:portrait];
                 self.longArt = portrait;
                 cursorY -= artH + 20;
+                if (EBTraceOn())
+                    fprintf(stderr, "[EB] long break figure %.0fx%.0f pt on a %.0fx%.0f screen, top y=%.0f\n",
+                            artW, artH, NSWidth(view.frame), NSHeight(view.frame), cursorY + artH);
             }
 
             static NSString *const tips[3] = { @"big_pause_text_1", @"big_pause_text_2", @"big_pause_text_3" };
@@ -696,7 +655,8 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
     _longClock = nil;
     _longBreakMsLeft = 0;
     _longArt = nil;
-    _longSwayPhase = 0;
+    _longStretchPhase = 0;
+    _longStretchTick = 0;
     if (animated && (_longBreakWnds.count || _longBreakDimWnds.count)) {
         [self fadeOut:_longBreakDimWnds];
         [self fadeOut:_longBreakWnds];
@@ -776,43 +736,16 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
             // just below the title; the original started it at 38 from the top, which overlapped the
             // title, and mixing the two coordinate systems put it off the panel.
             CGFloat artTop = titleBottom - 6;
-            NSImage *headArt = _animation.headImage;
             NSImage *art = _animation.image;
 
-            if (headArt && art) {
-                // Two layers, bottom-aligned as one figure. The head overlaps the top of the torso by
-                // EBNeckOverlapPt so the seam stays covered while the torso lifts underneath it.
-                CGFloat torsoW = art.size.width, torsoH = art.size.height;
-                CGFloat headW = headArt.size.width, headH = headArt.size.height;
-                CGFloat totalH = headH + torsoH - EBNeckOverlapPt;
-                CGFloat baseY = artTop - totalH;
-
-                NSImageView *torso = [[NSImageView alloc] initWithFrame:NSMakeRect(18, baseY, torsoW, torsoH)];
-                torso.image = art;
-                torso.wantsLayer = YES;
-                torso.layer.transform = _animation.transform;
-                [view addSubview:torso];
-                _shortImage = torso;
-
-                NSImageView *head = [[NSImageView alloc] initWithFrame:NSMakeRect(18 + (torsoW - headW) / 2.0,
-                                                                                baseY + torsoH - EBNeckOverlapPt,
-                                                                                headW, headH)];
-                head.image = headArt;
-                head.wantsLayer = YES;
-                // Pivot on the bottom edge: the head is a separate layer, and rotating it about its own
-                // centre would swing the face away from the neck instead of tilting it.
-                head.layer.anchorPoint = CGPointMake(0.5, 0.0);
-                head.layer.transform = _animation.headTransform;
-                [view addSubview:head];
-                _shortHead = head;
-            } else if (art) {
-                NSImageView *image = [[NSImageView alloc] initWithFrame:NSMakeRect(18, artTop - art.size.height,
-                                                                                    art.size.width, art.size.height)];
+            if (art) {
+                // One picture. It used to be two layers here, a head over a torso moving independently,
+                // which read as a sliding image; every animated exercise now swaps between drawn frames
+                // instead, so the panel only ever has one image to place.
+                NSImageView *image =
+                    [[NSImageView alloc] initWithFrame:NSMakeRect(18, artTop - art.size.height, art.size.width,
+                                                                  art.size.height)];
                 image.image = art;
-                // Layer-backed so a moving exercise can be a transform rather than a different bitmap
-                // per pose, which is what keeps the rosettes from crawling.
-                image.wantsLayer = YES;
-                image.layer.transform = _animation.transform;
                 [view addSubview:image];
                 _shortImage = image;
             }
@@ -865,7 +798,6 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
 - (void)hideShortBreakAnimated:(BOOL)animated {
     [self restoreSuspendedApplication];
     _shortImage = nil;
-    _shortHead = nil;
     _shortTime = nil;
     _animation = nil;
     _shortBreakMsLeft = 0;
@@ -1105,10 +1037,15 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
 
     CGFloat artW = 71, artX = 6;
     CGFloat artY = (bubble.size.height - 44) / 2.0;
-    // A plain NSView subclass rather than a layer drawHandler: the drawing needs a flipped, AppKit
-    // coordinate system, and the glass is defined in points from the bottom like the rest of the UI.
-    EBWaterGlassView *art = [[EBWaterGlassView alloc] initWithFrame:NSMakeRect(artX, artY, artW, 44)];
-    [view addSubview:art];
+    // The vessel is a picture rather than the drawn glass this replaced. Each drink has its own glass,
+    // so a tea reminder and the water reminder are distinguishable at a glance, and both are lit the
+    // same way. If the bitmap is missing the space is left empty rather than showing a broken image.
+    NSImage *glass = [EBAssets.shared drinkImage:EBDrinkWater];
+    if (glass) {
+        NSImageView *art = [[NSImageView alloc] initWithFrame:NSMakeRect(artX, artY, artW, 44)];
+        art.image = glass;
+        [view addSubview:art];
+    }
 
     CGFloat textLeft = artX + artW + 8;
     CGFloat textWidth = bubble.size.width - textLeft - 10;
@@ -1159,10 +1096,97 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
     _waterMsLeft = 0;
 }
 
+// The brewing bubble. Built like the hydration one, from the same skin4 panel in the same corner, but the
+// vessel is the tea's own glass and there is no dismissal countdown: a steep lasts as long as it lasts,
+// and the number is how much of it is left.
+- (void)showTeaReminderWithCaption:(NSString *)caption
+                             image:(NSImage *)glass
+                            msLeft:(long)msLeft
+                   autoDismissMs:(long)autoDismissMs {
+    [self hideTeaReminder];
+
+    NSImage *bubble = EBAssets.shared.bubble;
+    if (!bubble)
+        return;
+
+    NSView *view = PanelBackground(bubble.size);
+    CGFloat artW = 71, artX = 6;
+    CGFloat artY = (bubble.size.height - 44) / 2.0;
+    if (glass) {
+        NSImageView *art = [[NSImageView alloc] initWithFrame:NSMakeRect(artX, artY, artW, 44)];
+        art.image = glass;
+        [view addSubview:art];
+    }
+    CGFloat textLeft = artX + artW + 8;
+    CGFloat textWidth = bubble.size.width - textLeft - 10;
+
+    // Two lines: what is brewing and which steep it is, then the time left on this one. The caption is
+    // longer than the water one's single instruction, so it gets the room it needs.
+    NSTextField *cap = Label(caption, 11, NSColor.whiteColor, NSTextAlignmentCenter, NO);
+    cap.frame = NSMakeRect(textLeft, bubble.size.height / 2.0 + 6, textWidth, 28);
+    [view addSubview:cap];
+    self.teaCaption = cap;
+
+    NSTextField *time = Label(EBTimeLeftText(msLeft, EBRussianNow(), NO), 13, EBAmber(),
+                              NSTextAlignmentCenter, YES);
+    time.frame = NSMakeRect(textLeft, bubble.size.height / 2.0 - 14, textWidth, 20);
+    [view addSubview:time];
+    self.teaTime = time;
+
+    EBOverlayWindow *window = [self windowWithView:view onDisplay:0 capturesInput:NO];
+    [window setFrame:EBBottomRightRect(bubble.size, NSScreen.mainScreen.visibleFrame, 0) display:NO];
+    window.alphaValue = 1;
+    self.teaWnd = window;
+    [window orderFrontRegardless];
+
+    // Take the token before scheduling and compare it when the timer fires. Without the check, a bubble
+    // already replaced by the next steep would be taken down by the previous notice's timer.
+    self.teaDismissToken++;
+    if (autoDismissMs > 0) {
+        NSUInteger token = self.teaDismissToken;
+        __weak EBOverlayController *weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)autoDismissMs * NSEC_PER_MSEC),
+                       dispatch_get_main_queue(), ^{
+                           if (weakSelf && weakSelf.teaDismissToken == token)
+                               [weakSelf hideTeaReminder];
+                       });
+    }
+
+    if (EBTraceOn())
+        fprintf(stderr, "[EB] tea bubble up: \"%s\", %ld ms left\n", caption.UTF8String, msLeft);
+}
+
+// Refreshes in place rather than rebuilding: a rebuild would put the bubble behind whatever was drawn
+// over it, and the steep can last several minutes.
+- (void)updateTeaReminderCaption:(NSString *)caption msLeft:(long)msLeft {
+    if (!self.teaWnd)
+        return;
+    self.teaCaption.stringValue = caption;
+    self.teaTime.stringValue = EBTimeLeftText(MAX(msLeft, 0), EBRussianNow(), NO);
+}
+
+- (void)hideTeaReminder {
+    // Bumped so a pending auto-dismiss for the bubble being taken down now does nothing.
+    self.teaDismissToken++;
+    if (self.teaWnd) {
+        [self.teaWnd orderOut:nil];
+        self.teaWnd = nil;
+    }
+    _teaCaption = nil;
+    _teaTime = nil;
+    if (EBTraceOn())
+        fprintf(stderr, "[EB] tea bubble hidden\n");
+}
+
+- (BOOL)teaReminderVisible {
+    return self.teaWnd != nil;
+}
+
 - (void)hideAll {
     [self restoreSuspendedApplication];
     [self hideNotification];
     [self hideWaterReminder];
+    [self hideTeaReminder];
     [self teardown:_longBreakWnds];
     [self teardown:_longBreakDimWnds];
     [self teardown:_shortBreakWnds];
@@ -1176,9 +1200,9 @@ static void DrawWaterGlass(CGFloat w, CGFloat h) {
     _longClock = nil;
     _longBreakMsLeft = 0;
     _longArt = nil;
-    _longSwayPhase = 0;
+    _longStretchPhase = 0;
+    _longStretchTick = 0;
     _shortImage = nil;
-    _shortHead = nil;
     _shortTime = nil;
     _shortBreakMsLeft = 0;
     _shortBreakClosable = NO;

@@ -58,6 +58,14 @@ static NSString *LocalizedListItem(NSString *keyFormat, int index) {
         window.title = NSLocalizedString(@"settings_title", @"settings window title");
         window.releasedWhenClosed = NO;
         [self buildWithStats:stats startAtLogin:startAtLogin];
+
+        // Centre the window. AppKit keeps a window where it was put, and this one was created at the
+        // origin, which is the bottom left corner: with the Dock along the bottom it landed underneath
+        // it, and the buttons at the foot of the stack, Save included, were unreachable until the window
+        // was dragged up by hand. -center works on the screen the window is already on and avoids the
+        // Dock, so this is the whole fix; measured on a 1470x956 display with a 60 pt Dock it puts the
+        // frame at y=293, clear of both the Dock below and the menu bar above.
+        [window center];
     }
     return self;
 }

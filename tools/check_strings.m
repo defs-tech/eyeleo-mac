@@ -50,9 +50,9 @@ static NSArray<NSString *> *AllKeys(void) {
     ]) {
         [keys addObject:k];
     }
-    // Exercises 1..7 are the original's, 8 and 9 were added in the port. Both sets carry five
-    // phrasings each.
-    for (int e = 1; e <= 9; e++)
+    // Exercises 1..7 are the original's, 8, 9 and 10 were added in the port. Each carries five
+    // phrasings.
+    for (int e = 1; e <= 10; e++)
         for (int i = 1; i <= 5; i++)
             [keys addObject:[NSString stringWithFormat:@"mini_pause_text_%d_%d", e, i]];
     for (int i = 1; i <= 10; i++)

@@ -8,6 +8,7 @@
 #import "ebtrace.h"
 #include <stdio.h>
 #import "ebsettingsui.h"
+#import "ebtea.h"
 #import "ebtext.h"
 
 static NSString *const kBundleID = @"local.eyeleo.EyeLeo";
@@ -22,7 +23,18 @@ static NSString *const kBundleID = @"local.eyeleo.EyeLeo";
 @property(nonatomic, strong, nullable) dispatch_source_t schedulerTimer;
 @property(nonatomic) uint64_t lastTickNanos;
 @property(nonatomic) BOOL reportedFirstTick;
+
+// Brewing state. Held by value rather than as an object: it is a handful of integers, it is copied into
+// the tick handler, and nothing outside this file needs to reach through a reference to read it.
+@property(nonatomic) EBTeaConfig teaConfig;
+@property(nonatomic) EBTeaSession tea;
+@property(nonatomic) BOOL teaConfigLoaded;
+@property(nonatomic) BOOL teaSuspended;
 @end
+
+// How long the "ready" notice stays up. Long enough to read, short enough not to become furniture: a
+// bubble left on screen after the tea is brewed is the thing this whole change set out to remove.
+static const long EBTeaReadyNoticeMs = 5000;
 
 @implementation EBAppDelegate
 
@@ -46,9 +58,11 @@ static NSString *const kBundleID = @"local.eyeleo.EyeLeo";
     // environment variables so a full cycle of breaks can be watched without recompiling:
     //   EYELEO_FAST_MODE=1        run timers up to 8x faster
     //   EYELEO_DEBUG=1            trace state transitions to stderr
-    //   EYELEO_TEST_EXERCISE      force which exercise a short break shows, 1..9
+    //   EYELEO_TEST_EXERCISE      force which exercise a short break shows, 1..10
     //   EYELEO_TEST_INTERVAL_MIN  clamp both break intervals to N minutes
     //   EYELEO_TEST_WATER_SEC     first hydration reminder after N seconds instead of the interval
+    //   EYELEO_TEST_TEA_SEC       start brewing after N seconds, 1..600
+    //   EYELEO_TEST_TEA_KIND      which tea, same values as EBDrinkKind; default green
     NSDictionary *env = NSProcessInfo.processInfo.environment;
 
     if ([env[@"EYELEO_FAST_MODE"] isEqualToString:@"1"]) {
@@ -68,6 +82,28 @@ static NSString *const kBundleID = @"local.eyeleo.EyeLeo";
             _overlays.forcedExercise = (EBExercise)n;
         NSLog(@"[EyeLeo] EYELEO_TEST_EXERCISE=%@ -> exercise %d", testExercise, (int)_overlays.forcedExercise);
         _core.persistenceSuspended = YES;
+    }
+
+    // A brewing session is short enough to watch, so the first steep can be made to start after N
+    // seconds instead of waiting for the menu.
+    NSString *testTea = env[@"EYELEO_TEST_TEA_SEC"];
+    if (testTea) {
+        int secs = testTea.intValue;
+        if (secs > 0 && secs <= 600) {
+            NSLog(@"[EyeLeo] EYELEO_TEST_TEA_SEC=%d, brewing starts in %d s", secs, secs);
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(secs - 1) * NSEC_PER_SEC),
+                           dispatch_get_main_queue(), ^{
+                               NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:@"test"
+                                                                              action:NULL
+                                                                       keyEquivalent:@""];
+                               // The kind is settable so a config change can be checked against every tea, not just the
+                               // first one in the list.
+                               const char *kindEnv = getenv("EYELEO_TEST_TEA_KIND");
+                               item.representedObject =
+                                   @(kindEnv ? (EBDrinkKind)atoi(kindEnv) : EBDrinkGreen);
+                               [self startTea:item];
+                           });
+        }
     }
 
     NSString *testWater = env[@"EYELEO_TEST_WATER_SEC"];
@@ -225,8 +261,92 @@ static NSString *const kBundleID = @"local.eyeleo.EyeLeo";
         EBTraceLap("first tick");
     }
     [_core tickWithElapsedMs:elapsedMs];
+    [self tickTeaWithMs:elapsedMs];
     [self rearmScheduler:self.schedulerTimer];
     [self refreshStatusItem];
+}
+
+// Brewing runs on the same scheduler as the breaks, so a steep ends on time whatever else is happening,
+// and stops when monitoring is suspended like everything else.
+- (void)tickTeaWithMs:(long)elapsedMs {
+    if (!EBTeaSessionValid(&_tea))
+        return;
+    BOOL russian = EBRussianNow();
+
+    // The timer runs even while a break is up, so a steep can run out during one. That is the honest
+    // reading: nobody poured anything during the break.
+    if (EBTeaSessionAdvance(&_tea, elapsedMs)) {
+        NSString *caption = EBTeaSessionCaption(&_teaConfig, &_tea, russian);
+        if (_tea.finished) {
+            // The last steep ran out: the tea is brewed. Say so once, briefly, then clear the screen.
+            [_overlays showTeaReminderWithCaption:caption
+                                            image:[EBAssets.shared drinkImage:_tea.kind]
+                                           msLeft:0
+                                    autoDismissMs:EBTeaReadyNoticeMs];
+            if (EBTraceOn())
+                fprintf(stderr, "[EB] tea ready: %s\n", caption.UTF8String);
+            return;
+        }
+        // A steep ended and the next is not started. The bubble has nothing left to count, so it goes down
+        // rather than sitting at zero; the Pour item brings the next one up.
+        [_overlays hideTeaReminder];
+        if (EBTraceOn())
+            fprintf(stderr, "[EB] steep ran out, awaiting the next pour: %s\n", caption.UTF8String);
+        return;
+    }
+    [_overlays updateTeaReminderCaption:EBTeaSessionCaption(&_teaConfig, &_tea, russian) msLeft:_tea.msLeft];
+}
+
+// Choosing a tea starts its first steep immediately.
+- (void)startTea:(NSMenuItem *)sender {
+    EBDrinkKind kind = (EBDrinkKind)[(NSNumber *)sender.representedObject integerValue];
+    if (kind == EBDrinkNone)
+        return;
+    if (!_teaConfigLoaded) {
+        _teaConfig = EBLoadTeaConfig();
+        _teaConfigLoaded = YES;
+    }
+    // A break owns the screen, so brewing cannot start during one. The brewing bubble itself does not
+    // block: switching teas mid-session has to stay possible, and it is only on screen while nothing else
+    // is.
+    if (_overlays.anyVisible && !_overlays.teaReminderVisible)
+        return;
+
+    EBTeaSessionStart(&_tea, &_teaConfig, kind);
+    if (!EBTeaSessionValid(&_tea)) {
+        EBTeaSessionStop(&_tea);
+        return;
+    }
+    BOOL russian = EBRussianNow();
+    NSString *caption = EBTeaSessionCaption(&_teaConfig, &_tea, russian);
+    [_overlays showTeaReminderWithCaption:caption
+                                    image:[EBAssets.shared drinkImage:kind]
+                                   msLeft:_tea.msLeft
+                            autoDismissMs:0];
+    if (EBTraceOn())
+        fprintf(stderr, "[EB] brewing started: %s\n", caption.UTF8String);
+}
+
+// Pours the next steep. This is the only place the step number moves; the timer alone never does it.
+- (void)pourNextSteep:(id)sender {
+    if (!EBTeaSessionValid(&_tea))
+        return;
+    // A break owns the screen, so the bubble cannot come back up underneath one. The menu already reflects
+    // this, but a stale menu can still deliver the action.
+    if (_overlays.anyVisible && !_overlays.teaReminderVisible)
+        return;
+
+    BOOL russian = EBRussianNow();
+    if (!EBTeaSessionPour(&_tea, &_teaConfig))
+        return; // still steeping, nothing pending, or the session already ended
+    NSString *caption = EBTeaSessionCaption(&_teaConfig, &_tea, russian);
+
+    [_overlays showTeaReminderWithCaption:caption
+                                    image:[EBAssets.shared drinkImage:_tea.kind]
+                                   msLeft:_tea.msLeft
+                            autoDismissMs:0];
+    if (EBTraceOn())
+        fprintf(stderr, "[EB] poured: %s\n", caption.UTF8String);
 }
 
 - (void)stopScheduler {
@@ -283,6 +403,56 @@ static NSString *const kBundleID = @"local.eyeleo.EyeLeo";
     [self rebuildMenu];
 }
 
+// The brewing section: Pour, then New tea with one entry per tea.
+//
+// Pour starts the next steep, so it is only offered while something is brewing. Choosing a tea from the
+// submenu starts its first steep straight away: brewing is the point of picking one, and asking for a
+// second click to begin would be a step for nothing. The tick on the current tea marks the one in progress.
+- (void)rebuildTeaMenuLocked:(BOOL)locked {
+    if (!_teaConfigLoaded) {
+        _teaConfig = EBLoadTeaConfig();
+        _teaConfigLoaded = YES;
+    }
+    BOOL brewing = EBTeaSessionValid(&_tea);
+
+    // The title carries how long the next steep will run, because that is the one number worth knowing
+    // before deciding to pour, and it is visible without hovering.
+    NSString *pourTitle = NSLocalizedString(@"tb_menu_pour", @"menu");
+    int nextSec = EBTeaSessionNextSeconds(&_teaConfig, &_tea);
+    if (nextSec > 0)
+        pourTitle = [NSString stringWithFormat:@"%@ · %d %@", pourTitle, nextSec,
+                                               EBRussianNow() ? @"с" : @"s"];
+    NSMenuItem *pour = [self.menu addItemWithTitle:pourTitle
+                                            action:@selector(pourNextSteep:)
+                                     keyEquivalent:@""];
+    // Offered exactly when there is something to pour: a steep has run out and another one is left. It is
+    // not disabled while the bubble is up, because the bubble is how the user knows a steep ended.
+    pour.enabled = !locked && brewing && _tea.awaiting && !_tea.finished;
+
+    NSMenuItem *newTea = [self.menu addItemWithTitle:NSLocalizedString(@"tb_menu_new_tea", @"menu")
+                                              action:NULL
+                                       keyEquivalent:@""];
+    NSMenu *teaMenu = [[NSMenu alloc] init];
+    static const EBDrinkKind kTeas[] = { EBDrinkGreen, EBDrinkWhite, EBDrinkOolong, EBDrinkBlack,
+                                         EBDrinkPuer, EBDrinkHerbal };
+    for (size_t i = 0; i < sizeof(kTeas) / sizeof(kTeas[0]); i++) {
+        EBDrinkKind kind = kTeas[i];
+        NSMenuItem *item = [teaMenu addItemWithTitle:EBTeaName(kind, EBRussianNow())
+                                               action:@selector(startTea:)
+                                        keyEquivalent:@""];
+        item.representedObject = @(kind);
+        item.enabled = !locked;
+        item.state = (brewing && _tea.kind == kind) ? NSControlStateValueOn : NSControlStateValueOff;
+        // The schedule as a tooltip, so the item title stays just the name. Whether AppKit paints a
+        // tooltip on a menu item inside a status item menu is worth checking by eye; the Pour item above
+        // carries the number that matters either way.
+        item.toolTip = EBTeaSchemeSummary(&_teaConfig, kind, EBRussianNow());
+    }
+    newTea.submenu = teaMenu;
+
+    [self.menu addItem:[NSMenuItem separatorItem]];
+}
+
 - (void)rebuildMenu {
     [self.menu removeAllItems];
 
@@ -317,6 +487,8 @@ static NSString *const kBundleID = @"local.eyeleo.EyeLeo";
     [self.menu addItemWithTitle:NSLocalizedString(@"tb_menu_take_break_now", @"menu")
                           action:@selector(takeBreakNow:)
                    keyEquivalent:@""];
+
+    [self rebuildTeaMenuLocked:locked];
 
     NSMenuItem *login = [self.menu addItemWithTitle:NSLocalizedString(@"tb_menu_open_at_login", @"menu")
                                              action:@selector(toggleLoginItem:)
@@ -462,11 +634,13 @@ static NSString *const kBundleID = @"local.eyeleo.EyeLeo";
 
 - (void)presentLongBreakWithSeconds:(int)seconds demo:(BOOL)demo {
     (void)demo; // the demo differs only in length, which the core already applied
+    [self suspendTeaForBreak];
     [_overlays showLongBreakWithSeconds:seconds];
 }
 
 - (void)dismissLongBreak {
     [_overlays hideLongBreakAnimated:YES];
+    [self resumeTeaAfterBreak];
 }
 
 - (void)presentCountdownWithMsLeft:(long)msLeft display:(int)display {
@@ -483,6 +657,42 @@ static NSString *const kBundleID = @"local.eyeleo.EyeLeo";
 
 - (BOOL)waterReminderDeferred {
     return [_overlays showWaterReminderDeferred];
+}
+
+// A break takes the screen, so brewing gets out of its way. The session itself is kept rather than
+// dropped: the tea is still steeping, the bubble just is not on top of the break. It comes back when the
+// break clears.
+- (void)suspendTeaForBreak {
+    if (!EBTeaSessionValid(&_tea))
+        return;
+    _teaSuspended = _overlays.teaReminderVisible;
+    if (!_teaSuspended)
+        return;
+    [_overlays hideTeaReminder];
+    if (EBTraceOn())
+        fprintf(stderr, "[EB] tea bubble suspended for a break\n");
+}
+
+// Brings the brewing bubble back after a break, if the tea is still going. Called once the overlays are
+// clear, so nothing lands underneath the break that follows.
+//
+// A session that ran out during the break comes back showing that its steep is done and waiting, which is
+// what happened: the timer was never stopped.
+- (void)resumeTeaAfterBreak {
+    if (!_teaSuspended || !EBTeaSessionValid(&_tea) || _tea.finished)
+        return;
+    _teaSuspended = NO;
+    // A steep that ran out during the break has nothing to count, so no bubble comes back: the Pour item is
+    // what brings the next one up, same as when the break is not involved.
+    if (_tea.awaiting)
+        return;
+    BOOL russian = EBRussianNow();
+    [_overlays showTeaReminderWithCaption:EBTeaSessionCaption(&_teaConfig, &_tea, russian)
+                                    image:[EBAssets.shared drinkImage:_tea.kind]
+                                   msLeft:_tea.msLeft
+                            autoDismissMs:0];
+    if (EBTraceOn())
+        fprintf(stderr, "[EB] tea bubble restored after the break\n");
 }
 
 - (void)presentBeforeBreak {
@@ -502,6 +712,7 @@ static NSString *const kBundleID = @"local.eyeleo.EyeLeo";
 }
 
 - (void)presentShortBreakShowCount:(unsigned)showCount fullscreen:(BOOL)fullscreen {
+    [self suspendTeaForBreak];
     [_overlays showShortBreakWithCount:showCount
                              durationMs:(long)_core.settings.miniPauseDuration * 1000
                              fullscreen:fullscreen

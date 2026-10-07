@@ -43,25 +43,38 @@ RU_EXERCISE_VERB = {
     5: "Моргайте.",
     6: "Посмотрите вдаль за окно.",
     7: "Потянитесь.",
-    # Added in the port. Ids 8 and 9 do not exist in the original langpack, so all five phrasings are
-    # written out below rather than derived from it. Ids 1..7 are untouched.
+    # Added in the port. Ids 8, 9 and 10 do not exist in the original langpack, so all five phrasings
+    # are written out below rather than derived from it. Ids 1..7 are untouched.
     8: "Закройте глаза полностью и мягко, десять раз.",
     9: "Поднимите и опустите плечи.",
+    10: "Закройте глаза ладонями.",
 }
 
-# Full phrasings for the two exercises added in the port. The four templated lines the generator
+# Full phrasings for the three exercises added in the port. The four templated lines the generator
 # derives from RU_EXERCISE_VERB ("Время для перерыва.", "Короткий перерыв!") read acceptably for
-# these two as well, so only lines 1-3 need writing.
+# these as well, so only lines 1-3 need writing. Line 3 is a different phrasing on purpose, so the
+# five are not five renderings of one sentence.
 RU_PORT_ADDED = {
     8: [
         "Короткий перерыв!\nЗакройте глаза полностью и мягко, десять раз.",
         "Время для перерыва!\nЗакройте глаза полностью и мягко, десять раз.",
         "Перерыв!\nЗакройте глаза полностью и мягко, десять раз.",
+        "Время для перерыва.\nЗакройте глаза полностью и мягко, десять раз.",
+        "Короткий перерыв!\nЗакройте глаза полностью и мягко, десять раз.",
     ],
     9: [
         "Короткий перерыв!\nПоднимите и опустите плечи.",
         "Время для перерыва!\nПоднимите и опустите плечи.",
         "Перерыв!\nПоднимите и опустите плечи.",
+        "Время для перерыва.\nПоднимите и опустите плечи.",
+        "Короткий перерыв!\nПоднимите и опустите плечи.",
+    ],
+    10: [
+        "Сделайте мини-перерыв\nи закройте глаза ладонями.",
+        "Время для перерыва.\nЗакройте глаза ладонями.",
+        "Короткий перерыв!\nПриложите ладони к глазам.",
+        "Время для перерыва!\nНакройте глаза ладонями.",
+        "Короткий перерыв!\nДайте глазам отдых в темноте ладоней.",
     ],
 }
 RU_EXTRA = {}
@@ -71,6 +84,34 @@ for ex, verb in RU_EXERCISE_VERB.items():
 for ex, lines in RU_PORT_ADDED.items():
     for idx, text in enumerate(lines, start=1):
         RU_EXTRA[f"mini_pause_text_{ex}_{idx}"] = text
+
+# The same three exercises in English. Ids 8, 9 and 10 are not in the original langpack either, so
+# these five phrasings each are the original English wording of the ports, kept alongside RU_PORT_ADDED
+# rather than derived from it: the Russian is a translation of these, not the other way round.
+EN_PORT_ADDED = {
+    8: [
+        "Take a short break!\nClose your eyes fully and gently, ten times.",
+        "Time for a short break!\nClose your eyes fully and gently, ten times.",
+        "Break!\nClose your eyes fully and gently, ten times.",
+        "Time for a break!\nClose your eyes fully and gently, ten times.",
+        "Short break!\nClose your eyes fully and gently, ten times.",
+    ],
+    9: [
+        "Take a short break!\nRaise and lower your shoulders.",
+        "Time for a short break!\nRaise and lower your shoulders.",
+        "Break!\nRaise and lower your shoulders.",
+        "Time for a break!\nRaise and lower your shoulders.",
+        "Short break!\nRaise and lower your shoulders.",
+    ],
+    10: [
+        "Take a short break!\nCover your eyes with your palms.",
+        "Take a break!\nCover your eyes with your palms.",
+        "Time for a short break!\nCup your hands over your eyes.",
+        "Time for a break!\nCover your eyes with your palms.",
+        "Short break!\nRest your eyes in the dark of your hands.",
+    ],
+}
+# Filled into EXTRA["en"] after EXTRA is defined, below.
 
 # Milestone lines. The original spends four of its eight slots on donation and update
 # prompts; those are replaced with neutral reminders.
@@ -153,10 +194,16 @@ EXTRA = {
         "unit.hour.one": "hour",
         "unit.hour.few": "hours",
         "unit.hour.many": "hours",
+        # The tea submenu. The steeps themselves are timed from tea.conf, not from strings.
+        "tb_menu_pour": "Pour",
+        "tb_menu_new_tea": "New tea",
     },
     "ru": {
         "status.error": "EyeLeo отдыхает",
         "tb_menu_open_at_login": "Запускать при входе",
+        # The tea submenu. The steeps themselves are timed from tea.conf, not from strings.
+        "tb_menu_pour": "Пролив",
+        "tb_menu_new_tea": "Новый чай",
         "settings_start_at_login": "Запускать при входе",
         "settings_start_at_login_tooltip": "Разрешить macOS запускать EyeLeo при входе в систему",
         "information_stats": "Статистика",
@@ -215,8 +262,16 @@ BASE_KEYS = (
         "notification_wnd_label",
     ]]
     + LIST_KEYS
-    + [f"mini_pause_text_{e}_{i}" for e in range(1, 8) for i in range(1, 6)]
+    # Exercises 1..7 are the original's. 8, 9 and 10 were added in the port and carry no langpack
+    # entry, so their phrasings come from EXTRA/RU_EXTRA below; the range has to reach them or the
+    # generator writes a file that silently drops all three.
+    + [f"mini_pause_text_{e}_{i}" for e in range(1, 11) for i in range(1, 6)]
 )
+
+# ORDER is built from BASE_KEYS and the extra dictionaries, and both must exist before it is.
+for ex, lines in EN_PORT_ADDED.items():
+    for idx, text in enumerate(lines, start=1):
+        EXTRA["en"][f"mini_pause_text_{ex}_{idx}"] = text
 
 ORDER = BASE_KEYS + sorted(EXTRA["en"]) + sorted(set(NEUTRAL["en"]))
 

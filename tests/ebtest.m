@@ -10,10 +10,14 @@
 // pure logic behind it (plural category, time spec) is checked.
 
 #import <Foundation/Foundation.h>
+#import <AppKit/AppKit.h>
 
 #import "ebcore.h"
 #import "ebgeometry.h"
 #import "ebtext.h"
+#import "ebassets.h"
+#import "ebexercise.h"
+#import "ebtea.h"
 
 void EBTestSetIdleSeconds(double s);
 void EBTestSetFullscreenDisplay(int display);
@@ -26,6 +30,26 @@ static void Check(BOOL cond, NSString *what) {
         gFailures++;
         printf("  FAIL  %s\n", what.UTF8String);
     }
+}
+
+// NSBitmapImageRep has no constructor that takes a path, and NSImage would add a resolution and an
+// orientation that say nothing about the file. Read the bytes and let the rep parse them.
+static NSBitmapImageRep *RepFromPath(NSString *path) {
+    NSData *d = [NSData dataWithContentsOfFile:path];
+    return d ? [[NSBitmapImageRep alloc] initWithData:d] : nil;
+}
+
+static void Checkf(BOOL cond, NSString *fmt, ...) NS_FORMAT_FUNCTION(2, 3);
+static void Checkf(BOOL cond, NSString *fmt, ...) {
+    gChecks++;
+    if (cond)
+        return;
+    gFailures++;
+    va_list ap;
+    va_start(ap, fmt);
+    NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:ap];
+    va_end(ap);
+    printf("  FAIL  %s\n", msg.UTF8String);
 }
 
 static void CheckEq(long got, long want, NSString *what) {
@@ -637,6 +661,319 @@ static void TestDemoBreakLength(void) {
     CheckEq(rec.nLastLongBreakSeconds, 5 * 60, @"non-strict demo keeps the full duration");
 }
 
+static void TestPersonageFramesAndExercises(void) {
+    printf("personage frames and exercises\n");
+    // The name array in ebassets.m is indexed by the raw enum value and sized by this constant, so if the
+    // two ever disagree a frame loads the wrong picture. The test binary runs outside the bundle, so
+    // mainBundle cannot find the artwork; check the files in the source tree instead, which is the same
+    // list that ships. Anything missing here would load as nil in the app and leave the exercise showing
+    // nothing at all.
+    Check(EBNumPersonageFrames == 17, @"seventeen personage frames");
+    Check(EBNumExercises == 10, @"ten exercises");
+    NSString *root = [@(__FILE__) stringByDeletingLastPathComponent];
+    root = [root stringByDeletingLastPathComponent]; // tests/ -> project root
+    static NSString *const kExpected[17] = {
+        @"leopard_default", @"leopard_look_left", @"leopard_look_right", @"leopard_look_up",
+        @"leopard_look_down", @"leopard_blink", @"leopard_close_tightly", @"leopard_shoulders_up",
+        @"leopard_shoulders_down", @"leopard_stretch_neutral", @"leopard_stretch_left",
+        @"leopard_stretch_right", @"leopard_stretch_up_neutral", @"leopard_stretch_up",
+        @"leopard_stretch_upper", @"leopard_eyes_open", @"leopard_eyes_closed",
+    };
+    for (int f = 0; f < EBNumPersonageFrames; f++) {
+        NSString *path = [root stringByAppendingPathComponent:
+                                       [@"Resources/Personages" stringByAppendingPathComponent:
+                                                      [kExpected[f] stringByAppendingPathExtension:@"png"]]];
+        Checkf([[NSFileManager defaultManager] fileExistsAtPath:path], @"personage frame %d (%@) exists", f,
+               kExpected[f]);
+    }
+
+    // Every frame an exercise cycles through has to be the same pixel size, and the frame it opens on
+    // has to come from that same cycle. The short break sizes its picture view once, from the frame the
+    // animation starts on, and afterwards swaps only the image, so a cycle that opened on a picture of
+    // a different size left its later frames drawn into the wrong box. This is not hypothetical: that
+    // is exactly what the shoulders exercise did when it was first added, since it had no case in the
+    // animation's initialiser and fell through to the painted head before swapping to the real frames.
+    // Reading the sizes off the shipped files for the same reason as the existence check above.
+    NSString *personages = [root stringByAppendingPathComponent:@"Resources/Personages"];
+    for (int e = 1; e <= EBNumExercises; e++) {
+        EBExercise exercise = (EBExercise)e;
+        NSUInteger count = EBExerciseFrameCount(exercise);
+        if (exercise == EBExerciseWindow)
+            Checkf(count == 0, @"exercise %d looks out of the window and animates no artwork", e);
+        for (NSUInteger i = 0; i < count; i++) {
+            EBPersonageFrame frame = EBExerciseFrameAt(exercise, i);
+            EBPersonageFrame first = EBExerciseFrameAt(exercise, 0);
+            Checkf(frame >= 0 && frame < EBNumPersonageFrames && first >= 0 && first < EBNumPersonageFrames,
+                   @"exercise %d frame %lu indexes a real frame", e, (unsigned long)i);
+            if (frame < 0 || frame >= EBNumPersonageFrames || first < 0 || first >= EBNumPersonageFrames)
+                continue;
+            NSBitmapImageRep *rep = RepFromPath([personages stringByAppendingPathComponent:
+                                                               [kExpected[frame] stringByAppendingPathExtension:
+                                                                            @"png"]]);
+            NSBitmapImageRep *firstRep = RepFromPath([personages stringByAppendingPathComponent:
+                                                                  [kExpected[first] stringByAppendingPathExtension:
+                                                                           @"png"]]);
+            Checkf(rep && firstRep, @"exercise %d frame %lu (%@) decodes", e, (unsigned long)i, kExpected[frame]);
+            if (rep && firstRep)
+                Checkf(rep.pixelsWide == firstRep.pixelsWide && rep.pixelsHigh == firstRep.pixelsHigh,
+                       @"exercise %d frame %lu (%@) matches its opening frame %@ in size (%ldx%ld vs %ldx%ld)",
+                       e, (unsigned long)i, kExpected[frame], kExpected[first], (long)rep.pixelsWide,
+                       (long)rep.pixelsHigh, (long)firstRep.pixelsWide, (long)firstRep.pixelsHigh);
+        }
+    }
+
+    // A generated frame must carry real transparency, or it would show as a magenta rectangle over the
+    // dimmed desktop.
+    for (int f = 7; f < EBNumPersonageFrames; f++) {
+        NSString *path = [root stringByAppendingPathComponent:
+                                       [@"Resources/Personages" stringByAppendingPathComponent:
+                                                      [kExpected[f] stringByAppendingPathExtension:@"png"]]];
+        NSBitmapImageRep *r = RepFromPath(path);
+        Checkf(r && r.hasAlpha, @"frame %@ carries an alpha channel", kExpected[f]);
+    }
+
+    // Every exercise has to have text in every language, and the count has to be contiguous from 1:
+    // lineCountFor walks up until the first gap, so a missing line 3 would silently shorten the set.
+    // Read the .strings files rather than going through NSLocalizedString: the test binary is not the
+    // bundle, so lookups there find nothing and every exercise would appear to have no text at all.
+    for (NSString *lang in @[ @"en", @"ru" ]) {
+        NSString *path = [root stringByAppendingPathComponent:
+                                       [NSString stringWithFormat:@"%@.lproj/Localizable.strings", lang]];
+        NSString *body = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];
+        Checkf(body.length > 0, @"%@.strings readable", lang);
+        if (!body.length)
+            continue;
+        for (int e = 1; e <= EBNumExercises; e++) {
+            for (int i = 1; i <= 5; i++) {
+                NSString *key = [NSString stringWithFormat:@"\"mini_pause_text_%d_%d\"", e, i];
+                Checkf([body rangeOfString:key].location != NSNotFound, @"%@ has %@", lang, key);
+            }
+            // Line 6 must not exist: the counter would then report six phrasings.
+            NSString *key6 = [NSString stringWithFormat:@"\"mini_pause_text_%d_6\"", e];
+            Checkf([body rangeOfString:key6].location == NSNotFound, @"%@ stops before %@", lang, key6);
+        }
+    }
+}
+
+// The frame cycling itself is exercised here rather than in the bundle either: EBExerciseAnimation
+// reaches for its artwork through mainBundle, which is the wrong bundle when the tests run. So the
+// animation object is checked for behaviour that does not depend on the image, and the artwork it
+// would ask for is checked by name above.
+static void TestDrinkVessels(void) {
+    printf("drink vessels\n");
+    // Seven vessels, one per drink. A missing file would leave the reminder with an empty gap where the
+    // glass goes, and the tea types would all look the same, so check the files the way the frames were
+    // checked: in the source tree, because the test binary is not the bundle.
+    Check(EBNumDrinks == 7, @"seven drinks");
+    NSString *root = [@(__FILE__) stringByDeletingLastPathComponent];
+    root = [root stringByDeletingLastPathComponent];
+    static NSString *const kDrinks[7] = { @"tea_green", @"tea_white", @"tea_oolong", @"tea_black",
+                                          @"tea_puer", @"tea_herbal", @"tea_water" };
+    for (int i = 0; i < EBNumDrinks; i++) {
+        NSString *path = [root stringByAppendingPathComponent:
+                                       [@"Resources" stringByAppendingPathComponent:
+                                          [kDrinks[i] stringByAppendingPathExtension:@"png"]]];
+        Checkf([[NSFileManager defaultManager] fileExistsAtPath:path], @"%@ exists", kDrinks[i]);
+        NSBitmapImageRep *r = RepFromPath(path);
+        Checkf(r != nil, @"%@ decodes", kDrinks[i]);
+        if (r)
+            Checkf(r.hasAlpha, @"%@ carries an alpha channel", kDrinks[i]);
+    }
+    // Each vessel has to fit the 71x44 pt slot, or it would overlap the text column in the bubble. The
+    // stored bitmaps are twice that.
+    for (int i = 0; i < EBNumDrinks; i++) {
+        NSString *path = [root stringByAppendingPathComponent:
+                                       [@"Resources" stringByAppendingPathComponent:
+                                          [kDrinks[i] stringByAppendingPathExtension:@"png"]]];
+        NSBitmapImageRep *r = RepFromPath(path);
+        if (!r)
+            continue;
+        Checkf(r.pixelsWide <= 142 && r.pixelsHigh <= 88, @"%@ fits the 142x88 slot (%ldx%ld)", kDrinks[i],
+               (long)r.pixelsWide, (long)r.pixelsHigh);
+    }
+    // Out of range values have to come back nil rather than the wrong vessel: drinkImage: indexes its
+    // array with the raw value.
+    Check([EBAssets.shared drinkImage:EBDrinkNone] == nil, @"no glass for the empty kind");
+    Check([EBAssets.shared drinkImage:(EBDrinkKind)EBNumDrinks] == nil, @"no glass past the last kind");
+    Check([EBAssets.shared drinkImage:(EBDrinkKind)99] == nil, @"no glass for a nonsense kind");
+}
+
+static void TestAnimationCadence(void) {
+    printf("animation cadence\n");
+    // Every animated exercise must actually advance. "Look at the window" is the one the original
+    // deliberately never animated, so it is the only one allowed to sit still.
+    static const int kAnimating[] = { 1, 2, 3, 4, 5, 7, 8, 9, 10 };
+    for (size_t i = 0; i < sizeof(kAnimating) / sizeof(kAnimating[0]); i++) {
+        EBExerciseAnimation *a = [[EBExerciseAnimation alloc] initWithExercise:(EBExercise)kAnimating[i]];
+        CATransform3D before = a.transform;
+        for (int t = 0; t < 40; t++)
+            [a advance];
+        CATransform3D after = a.transform;
+        // Identity either way: every exercise swaps artwork now, so nothing moves.
+        Checkf(before.m11 == 1.0f && before.m22 == 1.0f && before.m42 == 0.0f,
+               @"exercise %d starts on an identity transform", kAnimating[i]);
+        Checkf(after.m11 == 1.0f && after.m22 == 1.0f && after.m42 == 0.0f,
+               @"exercise %d keeps an identity transform", kAnimating[i]);
+    }
+    // Exercise 6 looks out of the window and is meant to hold still.
+    EBExerciseAnimation *window = [[EBExerciseAnimation alloc] initWithExercise:EBExerciseWindow];
+    for (int t = 0; t < 40; t++)
+        [window advance];
+    Check(window.transform.m11 == 1.0f, @"window exercise holds still");
+}
+
+static void TestTeaConfigAndSession(void) {
+    printf("tea config and session\n");
+    // With no tea.conf on disk the built-in schedule has to be returned rather than an empty set, since a
+    // fresh install has nothing configured and the feature still has to work.
+    EBTeaConfig cfg = EBLoadTeaConfig();
+    Check(cfg.count >= 6, @"defaults cover the six teas");
+
+    // The defaults are the researched ones, so check a couple of them rather than only that something
+    // parsed: the point of the table is that the numbers were looked up.
+    int green = (int)EBDrinkGreen - 1;
+    Check(cfg.schemes[green].count == 6, @"green tea has six steeps");
+    CheckEq(cfg.schemes[green].seconds[0], 10, @"first green steep is 10 s");
+    CheckEq(cfg.schemes[green].seconds[5], 35, @"last green steep is 35 s");
+    int puer = (int)EBDrinkPuer - 1;
+    Check(cfg.schemes[puer].count == 8, @"pu-erh has eight steeps");
+    CheckEq(cfg.schemes[puer].seconds[7], 90, @"last pu-erh steep is 90 s");
+    int herbal = (int)EBDrinkHerbal - 1;
+    CheckEq(cfg.schemes[herbal].seconds[0], 300, @"herbal first steep is 300 s");
+
+    // Water has no steeping schedule, so there is nothing to brew.
+    Check(cfg.schemes[(int)EBDrinkWater - 1].seconds == NULL, @"water has no schedule");
+
+    EBTeaSession s;
+    EBTeaSessionStart(&s, &cfg, EBDrinkGreen);
+    Check(EBTeaSessionValid(&s), @"session started");
+    CheckEq(s.steep, 0, @"starts on the first steep");
+    CheckEq(s.msLeft, 10000, @"first steep is 10 s");
+    CheckEq(s.count, 6, @"session knows the steep count");
+    Check(!s.awaiting, @"not waiting before the first steep runs out");
+    Check(!s.finished, @"not finished at the start");
+
+    // A tick must not move the step on. Brewing is paced by whoever is pouring, and the earlier version
+    // ran all six in a row unattended.
+    Check(!EBTeaSessionAdvance(&s, 9000), @"still steeping before the time is up");
+    CheckEq(s.msLeft, 1000, @"time counted down");
+    Check(EBTeaSessionAdvance(&s, 2000), @"steep runs out on time");
+    CheckEq(s.steep, 0, @"step does not advance on its own");
+    Check(s.awaiting, @"waits for the next pour");
+    CheckEq(s.msLeft, 0, @"timer rests at zero");
+
+    // Time going by while waiting changes nothing at all.
+    for (int i = 0; i < 50; i++)
+        EBTeaSessionAdvance(&s, 1000);
+    CheckEq(s.steep, 0, @"still on the first steep after waiting");
+    Check(s.awaiting, @"still waiting");
+
+    // Pouring mid-steep is refused, so a running timer is never thrown away.
+    EBTeaSession mid;
+    EBTeaSessionStart(&mid, &cfg, EBDrinkGreen);
+    Check(!EBTeaSessionPour(&mid, &cfg), @"cannot pour while a steep is running");
+    CheckEq(mid.steep, 0, @"still on the first steep after a refused pour");
+
+    // Pouring on request moves the step and sets the next time.
+    Check(EBTeaSessionPour(&s, &cfg), @"pour starts the next steep");
+    CheckEq(s.steep, 1, @"moved to the second steep");
+    CheckEq(s.msLeft, 15000, @"second steep is 15 s");
+    Check(!s.awaiting, @"no longer waiting");
+    Check(!s.finished, @"session continues");
+    CheckEq(EBTeaSessionNextSeconds(&cfg, &s), 0, @"no next steep to report yet");
+
+    // The full schedule, one steep per Pour, and the session ends by itself once the last steep runs out.
+    // It used to need one more press to finish, which left a bubble on screen waiting for a pour that had
+    // nothing to start.
+    // Counted on a fresh session so the number of presses is unambiguous.
+    EBTeaSession whole;
+    EBTeaSessionStart(&whole, &cfg, EBDrinkGreen);
+    int guard = 0;
+    int pours = 0;
+    while (!whole.finished && guard++ < 1000) {
+        EBTeaSessionAdvance(&whole, 1000);
+        if (whole.awaiting && EBTeaSessionPour(&whole, &cfg))
+            pours++;
+    }
+    Check(whole.finished, @"a whole session finishes on its own");
+    // Six steeps, so five presses: the last one runs out by itself rather than being poured.
+    CheckEq(pours, 5, @"one press per steep except the last");
+
+    // Carry on the session under test from wherever it is now.
+    while (!s.finished && guard++ < 2000) {
+        EBTeaSessionAdvance(&s, 1000);
+        if (s.awaiting)
+            EBTeaSessionPour(&s, &cfg);
+    }
+    Check(s.finished, @"session finishes on its own");
+    CheckEq(s.steep, 5, @"stopped on the last steep");
+    Check(!s.awaiting, @"nothing left to pour");
+
+    // The moment the last steep runs out is the moment the session closes, with no press at all.
+    EBTeaSession tail;
+    EBTeaSessionStart(&tail, &cfg, EBDrinkGreen);
+    for (int i = 0; i < 5; i++) {
+        while (!tail.awaiting && !tail.finished)
+            EBTeaSessionAdvance(&tail, 1000);
+        EBTeaSessionPour(&tail, &cfg);
+    }
+    CheckEq(tail.steep, 5, @"on the final steep");
+    Check(!tail.finished, @"not finished while the final steep runs");
+    while (!tail.finished)
+        EBTeaSessionAdvance(&tail, 1000);
+    Check(tail.finished, @"the final steep finishing closes the session by itself");
+    Check(!EBTeaSessionPour(&tail, &cfg), @"nothing to pour once it has closed");
+    Check([EBTeaSessionCaption(&cfg, &tail, NO).lowercaseString containsString:@"ready"],
+          @"and it reads as ready");
+
+    // Pours past the end do nothing.
+    Check(!EBTeaSessionPour(&s, &cfg), @"cannot pour a finished session");
+    EBTeaSessionAdvance(&s, 5000);
+    Check(s.finished, @"stays finished");
+
+    // The wording has to follow the state, so the number on screen never claims a step that has not begun.
+    EBTeaSession fresh;
+    EBTeaSessionStart(&fresh, &cfg, EBDrinkGreen);
+    NSString *first = EBTeaSessionCaption(&cfg, &fresh, NO);
+    Check([first containsString:@"1"], @"caption numbers the first steep");
+    EBTeaSessionAdvance(&fresh, 11000);
+    NSString *ranOut = EBTeaSessionCaption(&cfg, &fresh, NO);
+    Check([ranOut containsString:@"done"], @"caption says the steep is done");
+    Check(![ranOut containsString:@"Steep 2"], @"caption does not name the next steep yet");
+    EBTeaSessionPour(&fresh, &cfg);
+    NSString *second = EBTeaSessionCaption(&cfg, &fresh, NO);
+    Check([second containsString:@"2"], @"caption names the second steep after pouring");
+    fresh.steep = fresh.count - 1;
+    Check([EBTeaSessionCaption(&cfg, &fresh, NO).lowercaseString containsString:@"last"],
+          @"caption marks the last steep");
+    fresh.finished = YES;
+    Check([EBTeaSessionCaption(&cfg, &fresh, NO).lowercaseString containsString:@"ready"],
+          @"caption says ready at the end");
+    NSString *ru = EBTeaSessionCaption(&cfg, &fresh, YES);
+    Check(ru.length > 0, @"russian caption exists");
+
+    // Water cannot be brewed.
+    EBTeaSession water;
+    EBTeaSessionStart(&water, &cfg, EBDrinkWater);
+    Check(!EBTeaSessionValid(&water), @"water is not brewable");
+    EBTeaSession none;
+    EBTeaSessionStart(&none, &cfg, EBDrinkNone);
+    Check(!EBTeaSessionValid(&none), @"nothing is not brewable");
+
+    // The tooltip carries the whole schedule, since the item title is only the tea's name.
+    NSString *sum = EBTeaSchemeSummary(&cfg, EBDrinkGreen, NO);
+    Check([sum containsString:@"10"], @"summary lists the first steep");
+    Check([sum containsString:@"35"], @"summary lists the last steep");
+    Check([sum containsString:@"6"], @"summary states how many steeps");
+    NSString *sumRu = EBTeaSchemeSummary(&cfg, EBDrinkPuer, YES);
+    Check([sumRu containsString:@"8"], @"russian summary states the steep count");
+    Check([sumRu containsString:@"с"], @"russian summary marks the unit");
+    Check(EBTeaSchemeSummary(&cfg, EBDrinkWater, NO).length > 0,
+          @"water has a summary even without a schedule");
+
+    EBTeaConfigFree(&cfg);
+}
+
 static void TestWarningInterval(void) {
     printf("warning interval bounds\n");
     // The notice needs room to count down before the dialog opens, so its floor is the shortest
@@ -821,6 +1158,10 @@ static void TestGeometry(void) {
 int main(void) {
     @autoreleasepool {
         printf("EyeLeo macOS core tests\n\n");
+        TestPersonageFramesAndExercises();
+        TestTeaConfigAndSession();
+        TestDrinkVessels();
+        TestAnimationCadence();
         TestWarningInterval();
         TestWaterReminder();
         TestGeometry();

@@ -51,10 +51,104 @@ static NSString *KeyFor(EBExercise exercise, int line) {
 
 @end
 
+// One entry per drawn frame an exercise moves through: which picture, and the exact _timeout value
+// the original assigned when that picture became current. advance() subtracts 100 per tick, so these
+// are the original's own values rather than clean millisecond counts; keeping them verbatim means the
+// cadence is unchanged by this refactor.
+typedef struct {
+    EBPersonageFrame frame;
+    int hold;
+} EBFrameStep;
+
+// Rolls through the look directions. The original showed the static head first and only entered this
+// loop on the first tick, so it listed the same default frame twice; the cycle starts directly on the
+// first move instead.
+static const EBFrameStep kLookHorz[] = {{EBFrameLookRight, 1200}, {EBFrameLookLeft, 1200}};
+static const EBFrameStep kLookVert[] = {{EBFrameLookDown, 1200}, {EBFrameLookUp, 1200}};
+static const EBFrameStep kRoll[] = {
+    {EBFrameLookLeft, 1200},
+    {EBFrameLookUp, 1200},
+    {EBFrameLookRight, 1200},
+    {EBFrameLookDown, 1200},
+};
+static const EBFrameStep kBlink[] = {{EBFrameDefault, 200}, {EBFrameBlink, 200}};
+static const EBFrameStep kCloseTightly[] = {{EBFrameDefault, 2000}, {EBFrameCloseTightly, 2000}};
+// Same cadence as the plain blink, but on the closed-eyes frame for longer than its open frame: the
+// point is a complete, unhurried blink, not a fast one.
+static const EBFrameStep kBlinkFully[] = {{EBFrameDefault, 200}, {EBFrameCloseTightly, 500}};
+// Two drawn frames rather than a transform. Moving one baked picture was tried first and read as a
+// sliding image, not as shoulders; swapping between two poses reads as the movement itself.
+// tools/mkframes.m aligns the pair so the markings do not crawl between them.
+static const EBFrameStep kShoulders[] = {{EBFrameShouldersUp, 350}, {EBFrameShouldersDown, 350}};
+// Arms down, arms up, then a backward bend, then back to standing. The original never animated this
+// exercise at all, so the three frames and this cadence are both new.
+static const EBFrameStep kStretch[] = {
+    {EBFrameStretchUpNeutral, 500},
+    {EBFrameStretchUp, 500},
+    {EBFrameStretchUpper, 500},
+};
+// Eyes open, then covered by both paws. Held longer than it takes to show, because the point is the
+// darkness and the warmth of the paws, not a blink.
+static const EBFrameStep kPalming[] = {{EBFrameEyesOpen, 700}, {EBFrameEyesClosed, 500}};
+
+static const EBFrameStep *StepsFor(EBExercise exercise, NSUInteger *outCount) {
+    switch (exercise) {
+    case EBExerciseLookHorz:
+        *outCount = sizeof(kLookHorz) / sizeof(kLookHorz[0]);
+        return kLookHorz;
+    case EBExerciseLookVert:
+        *outCount = sizeof(kLookVert) / sizeof(kLookVert[0]);
+        return kLookVert;
+    case EBExerciseRoll:
+        *outCount = sizeof(kRoll) / sizeof(kRoll[0]);
+        return kRoll;
+    case EBExerciseBlink:
+        *outCount = sizeof(kBlink) / sizeof(kBlink[0]);
+        return kBlink;
+    case EBExerciseCloseTightly:
+        *outCount = sizeof(kCloseTightly) / sizeof(kCloseTightly[0]);
+        return kCloseTightly;
+    case EBExerciseBlinkFully:
+        *outCount = sizeof(kBlinkFully) / sizeof(kBlinkFully[0]);
+        return kBlinkFully;
+    case EBExerciseNeckShoulders:
+        *outCount = sizeof(kShoulders) / sizeof(kShoulders[0]);
+        return kShoulders;
+    case EBExerciseStretch:
+        *outCount = sizeof(kStretch) / sizeof(kStretch[0]);
+        return kStretch;
+    case EBExercisePalming:
+        *outCount = sizeof(kPalming) / sizeof(kPalming[0]);
+        return kPalming;
+    case EBExerciseNone:
+    case EBExerciseWindow:
+    default:
+        *outCount = 0;
+        return NULL;
+    }
+}
+
+static int HoldFor(EBExercise exercise, NSUInteger index) {
+    NSUInteger count = 0;
+    const EBFrameStep *steps = StepsFor(exercise, &count);
+    return (steps && index < count) ? steps[index].hold : 200;
+}
+
+NSUInteger EBExerciseFrameCount(EBExercise exercise) {
+    NSUInteger count = 0;
+    StepsFor(exercise, &count);
+    return count;
+}
+
+EBPersonageFrame EBExerciseFrameAt(EBExercise exercise, NSUInteger index) {
+    NSUInteger count = 0;
+    const EBFrameStep *steps = StepsFor(exercise, &count);
+    return (steps && index < count) ? steps[index].frame : EBFrameDefault;
+}
+
 @implementation EBExerciseAnimation {
     int _state;
     int _timeout; // in 100 ms steps, as in the original
-    int _shoulderPhase;
     NSImage *_current;
 }
 
@@ -63,14 +157,10 @@ static NSString *KeyFor(EBExercise exercise, int line) {
         _exercise = exercise;
         _state = 0;
         _timeout = 400;
-        _shoulderPhase = 0;
 
-        if (exercise == EBExerciseWindow)
-            _current = EBAssets.shared.windowImage;
-        else if (exercise == EBExerciseNeckShoulders)
-            _current = [EBAssets.shared shouldersTorso];
-        else
-            _current = [EBAssets.shared personage:EBFrameDefault];
+        // Window is the one exercise whose artwork is not a personage frame.
+        _current = (exercise == EBExerciseWindow) ? EBAssets.shared.windowImage
+                                                   : [EBAssets.shared personage:EBExerciseFrameAt(exercise, 0)];
     }
     return self;
 }
@@ -80,104 +170,24 @@ static NSString *KeyFor(EBExercise exercise, int line) {
 }
 
 - (void)advance {
-    // Faithful to the original: these two never animate and never even tick down.
-    if (_exercise == EBExerciseWindow || _exercise == EBExerciseStretch)
+    // Faithful to the original: looking out of the window never animates and never even ticks down.
+    NSUInteger count = EBExerciseFrameCount(_exercise);
+    if (count == 0)
         return;
 
     _timeout -= 100;
     if (_timeout > 0)
         return;
 
-    switch (_exercise) {
-    case EBExerciseLookHorz:
-        _current = [EBAssets.shared personage:_state ? EBFrameLookLeft : EBFrameLookRight];
-        _state = _state ? 0 : 1;
-        _timeout = 1200;
-        break;
-
-    case EBExerciseLookVert:
-        _current = [EBAssets.shared personage:_state ? EBFrameLookUp : EBFrameLookDown];
-        _state = _state ? 0 : 1;
-        _timeout = 1200;
-        break;
-
-    case EBExerciseRoll: {
-        static const EBPersonageFrame order[4] = {
-            EBFrameLookLeft, EBFrameLookUp, EBFrameLookRight, EBFrameLookDown,
-        };
-        _current = [EBAssets.shared personage:order[_state]];
-        if (++_state == 4)
-            _state = 0;
-        _timeout = 1200;
-    } break;
-
-    case EBExerciseBlink:
-        _current = [EBAssets.shared personage:_state ? EBFrameBlink : EBFrameDefault];
-        _state = _state ? 0 : 1;
-        _timeout = 200;
-        break;
-
-    case EBExerciseCloseTightly:
-        _current = [EBAssets.shared personage:_state ? EBFrameCloseTightly : EBFrameDefault];
-        _state = _state ? 0 : 1;
-        _timeout = 2000;
-        break;
-
-    case EBExerciseBlinkFully:
-        // Same cadence as the plain blink, but on the closed-eyes frame for longer than its open
-        // frame: the point is a complete, unhurried blink, not a fast one.
-        _current = [EBAssets.shared personage:_state ? EBFrameCloseTightly : EBFrameDefault];
-        _state = _state ? 0 : 1;
-        _timeout = _state ? 500 : 200;
-        break;
-
-    case EBExerciseNeckShoulders:
-        // Deliberately not an image swap. Generating separate frames was tried and the leopard's
-        // rosettes came out differently in each one, so the markings crawled during the animation. Two
-        // fixed layers moving independently makes that impossible by construction, and unlike moving
-        // one baked image it actually reads as a body: the head tilts at the neck while the shoulders
-        // go up and down underneath it.
-        _shoulderPhase = (_shoulderPhase + 1) % 4;
-        _timeout = 350;
-        break;
-
-    default:
-        break;
-    }
-}
-
-// How far the torso rises, in points of the panel's own coordinate space -- not a fraction of the
-// artwork. Getting that wrong by treating the value as a fraction produced a 0.04 pt move, invisible in
-// practice. 2.5 pt against a 5 px overlap between the layers leaves the neck covered at every phase.
-static const double kShoulderLiftPt = 2.5;
-// How far the head leans, in radians: about 7 degrees, enough to read as a tilt without looking like
-// the face is falling off the neck.
-static const double kNeckTiltRad = 0.12;
-
-// Four phases per cycle: rest, lifted, rest, pressed. The rest phase between the two extremes is what
-// makes the movement read as a deliberate roll rather than a twitch.
-static const double kLiftPhases[4] = { 0.0, 1.0, 0.0, -0.4 };
-static const double kTiltPhases[4] = { 0.0, 0.7, 0.0, -0.7 };
-
-- (NSImage *)headImage {
-    return _exercise == EBExerciseNeckShoulders ? [EBAssets.shared shouldersHead] : nil;
+    _state = (_state + 1) % (int)count;
+    _current = [EBAssets.shared personage:EBExerciseFrameAt(_exercise, (NSUInteger)_state)];
+    _timeout = HoldFor(_exercise, (NSUInteger)_state);
 }
 
 - (CATransform3D)transform {
-    if (_exercise != EBExerciseNeckShoulders)
-        return CATransform3DIdentity;
-
-    // CALayer's y axis points up, so a lift is a positive translation.
-    double lift = kLiftPhases[_shoulderPhase] * kShoulderLiftPt;
-    return CATransform3DMakeTranslation(0, (float)lift, 0);
-}
-
-- (CATransform3D)headTransform {
-    if (_exercise != EBExerciseNeckShoulders)
-        return CATransform3DIdentity;
-
-    double tilt = kTiltPhases[_shoulderPhase] * kNeckTiltRad;
-    return CATransform3DMakeRotation((float)tilt, 0, 0, 1);
+    // Every exercise that animates now swaps artwork instead of moving it, so nothing is ever drawn
+    // offset from its position in the panel.
+    return CATransform3DIdentity;
 }
 
 @end

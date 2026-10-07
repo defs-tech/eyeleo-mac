@@ -75,6 +75,18 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)hideWaterReminder;
 - (void)hideNotification;
 
+// Brewing bubble. Same skin4 panel and corner as the hydration reminder, but it carries the glass of the
+// tea being brewed rather than the water one, and it stays up for as long as the steep lasts instead of
+// counting down to its own dismissal.
+// autoDismissMs of 0 leaves the bubble up until it is replaced or hidden; the completion notice passes a
+// few seconds so the tea does not end with a permanent marker on screen.
+- (void)showTeaReminderWithCaption:(NSString *)caption image:(nullable NSImage *)glass
+                            msLeft:(long)msLeft autoDismissMs:(long)autoDismissMs;
+- (void)updateTeaReminderCaption:(NSString *)caption msLeft:(long)msLeft;
+- (void)hideTeaReminder;
+// YES while a brewing bubble is up. The menu blocks "pour" then, so a steep cannot be started behind one.
+- (BOOL)teaReminderVisible;
+
 // Everything, immediately. Used on quit and when monitoring is suspended.
 - (void)hideAll;
 

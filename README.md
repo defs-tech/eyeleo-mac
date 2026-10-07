@@ -129,42 +129,57 @@ corrupted settings file: below 6 seconds the notice would have no time to count 
 The original had seven exercises and that is still true of exercises 1..7: same ids, same wording in
 both languages, same artwork. Nothing was removed or reworded. Three things were added.
 
-**Two exercises, ids 8 and 9.** "Close your eyes fully and gently, ten times" holds the closed-eyes
+**Three exercises, ids 8, 9 and 10.** "Close your eyes fully and gently, ten times" holds the closed-eyes
 frame longer than the open one, because the point is a complete unhurried blink rather than a fast one.
-"Raise and lower your shoulders" is shown as a bust of the leopard.
+"Raise and lower your shoulders" is a bust of the leopard with the shoulders up and down, and "cover
+your eyes with both paws" alternates between open eyes and eyes behind both paws. All three are drawn
+frames like every other exercise, and each has five phrasings per language.
 
-**The shoulder animation is code, not artwork.** Generating separate frames was tried and failed: the
-leopard's rosettes came out differently in each one and crawled across the fur. So the two layers are
-fixed and moved, which makes that impossible by construction.
+**Every animated exercise now swaps real artwork.** This is the biggest reversal in the port. Shoulders
+were first animated in code: two composited layers, head and torso, moved by `CATransform3D`, on the
+reasoning that a single generated pair would come out inconsistent and make the rosettes crawl across
+the fur. That reasoning was right about the failure and wrong about the cure. The two layers produced a
+sliding picture rather than a movement, and the mismatch between a rotating head and a lifting torso
+read as a bad composite rather than as a body.
 
-Two layers, not one. The first attempt baked the head and torso into a single image and translated it,
-which made the head travel with the shoulders; the eye saw a sliding picture, not a stretch. Split
-again, the head rotates about its own bottom edge while the torso lifts underneath, and the two
-disagreeing is what makes it read as a body.
+The cure was in the tool, not in the animation. `tools/mkframes.m` aligns every generated frame of a
+set on measurable anchors inside the artwork, so a frame pair is registered by construction instead of by
+hope; `CATransform3D` is now the identity for every exercise and `transform` exists only to keep the
+header honest. The rosettes do not crawl because both frames were measured against the same anchor.
 
-The head sinks 16 pt into the torso. Its own neck stub is about 11 px wide, so at a shallow overlap it
-stood out against the narrower top of the torso and the head looked like it was floating. Deep enough,
-the stub is entirely inside the torso and the junction disappears.
+`tools/mkframes.m` has five modes, `full`, `bust`, `eyes`, `shoulders` and `cups`. It removes the flat
+background by keying magenta, rejects stray pixels left inside the keyed region, resamples with an area
+average, aligns the frames of a set, and refuses to write anything whose size disagrees with its sibling
+or whose transparency is not real. It also writes `preview_*.png`, rendered on the panel's own dark
+background: judging a small figure by eye in this environment was repeatedly misleading, and several
+rounds of "the asset looks fine, the panel looks wrong" came down to something only visible against the
+background it will actually sit on.
 
-Two errors in the asset tool are worth recording, both the same mistake: a bounding box measured on one
-image was applied to another. The head's box was measured on the scaled probe and then used to crop the
-unscaled 156x98 source, which sampled the wrong region; earlier, the torso was measured after its context
-had been released. Both produced assets that looked subtly wrong with no error message. The fix was to
-crop out of the probe, at the scale the box was measured in.
+The bust for the shoulder exercise is cut from the same artwork as the long break rather than
+regenerated, so the two share a face. It is 276x220 px, shown at 138x110 pt. The generated frames carry no
+DPI metadata, so `EBAssets` halves them at load: everything from `EBFrameShouldersUp` up is 2× the
+original's 1× frames, and the seven inherited frames are 1×. Getting that wrong in either direction
+either doubles the picture or halves it to the size of a thumbnail.
 
-`preview_phase0..3.png` in `build/` show the assembled figure at each phase, rendered four times up on the
-panel's own dark background. Judging a 156x88 image by eye in this environment was repeatedly misleading,
-so the tool writes a preview rather than relying on someone opening the app.
+**The long break moves through real frames.** It was the one screen with no motion at all. It cycles a
+full-body figure through four poses, standing, leaning left, standing, leaning right, two seconds each,
+so one full sway takes eight seconds. The four are generated by the same tool as the exercises and
+aligned on the same anchors.
 
-**The long break now moves.** It was the one screen with no motion at all. It shows the same bust as
-the neck exercise, scaled up, leaning about 2.6 degrees to each side every six seconds. Generating a
-full-body figure was attempted and produced a quadruped, so the bust is reused and moved in code: one
-image, so the markings cannot drift, and a five minute break is long enough that a slow sway reads as
-relaxation rather than as a twitch.
+Sizing them needed more than a bounding box. The leaning poses throw a raised arm outside the figure, so
+measuring the bounding box made the leaning frames larger than the standing one, and scaling all four by
+the bounding box made the standing figure shrink in the middle of its own cycle. The tool normalises on
+the width of the calf instead, which is the one thing that stays put in every pose. The figure ends up at
+155x340 pt on a 1470x956 display.
+
+Generating the full body was attempted earlier and produced a quadruped, which is why the first version
+of this screen reused the bust and swayed it in code. The frames exist now, so the sway is drawn.
 
 **A hydration reminder.** Same `skin4` bubble, same bottom-right corner, same 209x71 footprint as the
-long-break countdown, with a glass drawn in code where the portrait usually sits. Advisory only: it
-never takes input and never captures the keyboard.
+long-break countdown, and now the same for tea, with a vessel in place of the portrait. It is a drawn
+image rather than code-drawn glass: seven cups, keyed through the `cups` mode of `tools/mkframes.m`,
+which keeps their real alpha instead of cutting it against the flat background the artwork was drawn on.
+Advisory only: it never takes input and never captures the keyboard.
 
 The values behind it. The 15-20 minute figure you will find in occupational health guidance is for
 work in heat, where sweat loss is real; it does not transfer to sitting at a desk. The relevant study
@@ -182,6 +197,23 @@ untouched machine will not show a reminder, because auto-relax arrives at minute
 The interval list is 15/20/25/30/45/60/90/120 and the portion list 50-250 ml. The worst combination
 those two lists allow is 15 min x 250 ml = 1000 ml/hour, against the 1414 ml/hour ceiling above which
 NIOSH warns about water intoxication. No settings combination can breach it, and a test asserts it.
+
+**A tea timer, with water as one more kind of it.** The same bubble, the same menu, the same countdown,
+so water is the tea menu's first entry rather than a second feature. Six teas ship with the usual steep
+times, white and green 10-15-20-25-30, oolong 15-25-35-45-60-75, black 20-30-40-50-60-70, puer
+20-30-40-50-60-70-80-90 and herbal 300-360-420-480, all in seconds. They live in `tea.conf` next to
+`settings.xml`, which is edited through the app rather than by hand in the container.
+
+Steeping is deliberately manual. An automatic timer cannot know when you have actually poured the water
+off the leaves, so a countdown would be wrong for anyone who looks away, and the fix for that is a
+button rather than a smarter guess. The menu item counts down to the next steep, the bubble hides once a
+steep has been taken, and after the last one the bubble says the tea is ready and closes itself after
+five seconds. Tooltips on the menu list each kind's whole scheme at once, so choosing between them does
+not require starting one.
+
+Two things the timer does not do. It does not stop for a break, because a steep that pauses while the
+user is looking at a screen is a bug, not a courtesy; and it does not remember the chosen tea on the next
+launch, so the tick mark is about this session only. Both were choices, not omissions.
 
 ## Reading settings written by other tools
 
@@ -260,7 +292,7 @@ make                      # build and sign build/EyeLeo.app
 open build/EyeLeo.app     # menu bar only, no Dock icon
 ```
 
-To see one specific exercise rather than waiting for it to come up in a draw of nine:
+To see one specific exercise rather than waiting for it to come up in a draw of ten:
 
 ```
 EYELEO_DEBUG=1 EYELEO_FAST_MODE=1 \
@@ -269,8 +301,9 @@ EYELEO_TEST_INTERVAL_MIN=1 EYELEO_TEST_ONLY=short EYELEO_TEST_EXERCISE=9 \
 ```
 
 Running the binary directly rather than through `open` is deliberate: it is how `EYELEO_DEBUG` reaches
-it. In debug mode the trace prints the panel layout and, for the neck and shoulders exercise, the live
-transform values, which is how the two-layer animation is checked.
+it. In debug mode the trace prints the panel layout, which is how the artwork placement is checked: the
+picture, the title and the countdown are each traced with their frames, and a wrong size there means the
+exercise opened on a frame of the wrong size.
 
 The hydration reminder is the one thing that cannot be reached quickly otherwise, since its interval
 bottoms out at fifteen minutes:
@@ -288,9 +321,12 @@ All off unless the environment variable is set. `EYELEO_DEBUG` also traces every
 | `EYELEO_DEBUG=1` | state machine trace, startup stage timings, overlay traces |
 | `EYELEO_FAST_MODE=1` | accelerates timers up to 8×, the port of `EyeApp::_fastMode` |
 | `EYELEO_TEST_INTERVAL_MIN=N` | overrides both break intervals to N minutes |
-
 | `EYELEO_TEST_ONLY=short\|long` | enables only one kind of break |
+| `EYELEO_TEST_EXERCISE=N` | forces exercise N on the next short break |
 | `EYELEO_TEST_OPEN_SETTINGS=1` | opens the settings window at launch |
+| `EYELEO_TEST_WATER_SEC=N` | fires the hydration reminder after N seconds |
+| `EYELEO_TEST_TEA_SEC=N` | fires the tea bubble after N seconds |
+| `EYELEO_TEST_TEA_KIND=name` | which tea or water the tea bubble shows |
 
 The overrides beat stored settings on purpose: `cfprefsd` caches preferences per app, so editing the
 container plist from a shell is not reliably visible to the sandboxed app. That is why they exist
@@ -348,10 +384,22 @@ disk holds the new value, a fresh process still reports the old one, and the tra
 read. `killall -u $USER cfprefsd` makes the new value appear, which is what proved the code was fine.
 Edit settings through the app, or through `defaults write` on the domain, not by writing the file.
 
-**A layer transform on a subview is invisible to `CGWindowListCopyWindowInfo`.** Verifying the shoulder
-lift through the window list reported a flat 396.0 for thirty samples, because the window frame does not
-move when a child view is transformed. The value is traced from the animation itself instead. Anything
-measured about a window position is a statement about the window, not about its contents.
+**The panel sizes its picture view once, from the frame an animation opens on.** The short break creates
+the panel, sets the image view's frame from whatever the animation is showing at that moment, and from
+then on swaps only the image. An exercise whose opening frame was a different size therefore drew its
+later frames into the wrong box, scaled or cropped, with nothing in the trace to say so. It happened for
+real: the shoulders exercise had no case in the animation's initialiser, fell through to the inherited
+painted head, and only swapped to the real frames on the first tick. The panel traced `156x98`, the
+inherited head, in front of frames that are `138x110`. Both the frame it opens on and every frame it
+cycles to now come from one table in `ebexercise.m`, and a test walks that table against the shipped
+files and fails if any two frames of a cycle disagree on size. It fails with the sizes in the message,
+which is how the fix was confirmed rather than assumed.
+
+**A transform is not what the eye reads as movement.** Worth keeping from the version this replaced:
+rotating a head about its own bottom edge while lifting a separate torso underneath did not read as a
+stretch, it read as a composite coming apart. Swapping between two aligned poses does read as the
+movement. The same panels that could not be moved convincingly in code could not be redrawn either, and
+the answer turned out to be in the tool.
 
 ## Deliberate differences from the Windows original
 
@@ -423,30 +471,36 @@ src/ebexercise.{h,m}  exercise choice and the personage animation
 src/ebwindows.{h,m}   the five overlays
 src/ebgeometry.{h,m}   overlay placement as pure functions, unit-tested against synthetic screens
 src/ebsettingsui.{h,m} settings window
+src/ebtea.{h,m}      tea.conf parsing and the brewing session, no AppKit beyond strings
 src/ebapp.{h,m}       menu bar, menu, scheduler, single instance, login item
 src/ebtrace.{h,m}     startup and state tracing
-tools/mkpersonage.m    keys the generated bust off its flat background and composites the app's own head
+tools/mkframes.m      builds every generated frame and vessel: keys off the flat background, aligns a
+                      frame set on anchors inside the artwork, and writes a preview to judge it against
 tools/gen_strings.py  regenerates both .strings files from the original langpacks
 tools/mkicon.m        draws the menu bar template icons and the app icon
 tools/measure.sh      the numbers above
 tools/check_strings.m localization coverage and plural spot-checks
 tools/windows.m       lists on-screen windows (bounds only; needs no permission)
 tools/smoke.sh       end-to-end check of the built app, not just the core
-tests/                176 checks over the core state machine, the overlay geometry and the settings file
+tests/                499 checks over the core state machine, the overlay geometry, the settings file and
+                      the generated artwork, plus a localization coverage check over 176 keys
 ```
 
 ## Tests
 
 The original ships none. The state machine is where a port silently eats the user's breaks, so it is
-covered: 115 checks over the full break cycle, pause and resume, inactivity auto-relax, fullscreen
-blocking and strict mode, the give-up path, restart resume, settings round-trip and clamping, plus
-the plural rules. `tests/ebdetect_stub.c` replaces the CoreGraphics detector so the tests run without
-a window server.
+covered: checks over the full break cycle, pause and resume, inactivity auto-relax, fullscreen blocking
+and strict mode, the give-up path, restart resume, settings round-trip and clamping, plus the plural
+rules. `tests/ebdetect_stub.c` replaces the CoreGraphics detector so the tests run without a window
+server. `tools/smoke.sh` adds 19 end-to-end checks against the built app, so an overlay that never
+appears on screen fails the build and not just a unit.
 
 ## Provenance
 
 The Windows original by Alexander Garustovich is CC BY-NC 4.0 (see `license.txt` in the original
 repository). Its assets, wording and behaviour are reused here under that licence, so this build is
-non-commercial and must keep the attribution. `Resources/` is copied verbatim from the original
-`bin/Resources` and `bin/Personages`. The Russian translations for the fourteen exercise phrasings the
+non-commercial and must keep the attribution. `Resources/` starts as a copy of the original
+`bin/Resources` and `bin/Personages`; the personage frames from `leopard_shoulders_up` up and all the
+tea vessels are generated for this port by `tools/mkframes.m` and are covered by the same licence. The
+Russian translations for the fourteen exercise phrasings the
 original never translated were written for this port; the rest of the Russian text is the original's.

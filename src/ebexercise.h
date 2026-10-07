@@ -8,6 +8,7 @@
 #define EB_EXERCISE_H
 
 #import <AppKit/AppKit.h>
+#import "ebassets.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -20,13 +21,26 @@ typedef NS_ENUM(int, EBExercise) {
     EBExerciseBlink,
     EBExerciseWindow,      // look at distant objects; excluded unless "window nearby" is on
     EBExerciseStretch,
-    // Added in the port, ids 8 and 9. Nothing existing was removed or reworded: the two new
-    // exercises simply join the pool, and every id 1..7 keeps its original text and artwork.
+    // Added in the port, ids 8, 9 and 10. Nothing existing was removed or reworded: the new exercises
+    // simply join the pool, and every id 1..7 keeps its original text.
     EBExerciseBlinkFully,  // close the eyes fully and gently, ten times
     EBExerciseNeckShoulders, // roll and release the shoulders
+    EBExercisePalming,      // cover the eyes with both paws
 };
 
-static const int EBNumExercises = 9; // exercises 1..9, matching the original's 1..7 plus the two new
+static const int EBNumExercises = 10; // exercises 1..10, the original's 1..7 plus three new ones
+
+// The drawn frames one exercise cycles through, in order. Both the frame the short break sizes its
+// picture for and every frame shown afterwards are read from this one list, so an exercise can never
+// open on one picture and swap to another of a different size. Looking out of the window does not
+// animate artwork at all, and the remaining exercises hold a single static head, so both report 0.
+// Every frame within a cycle is guaranteed to be the same pixel size; the test enforces it against
+// the shipped files.
+NSUInteger EBExerciseFrameCount(EBExercise exercise);
+
+// The frame at index within the cycle above, wrapping for animation purposes but not for this
+// accessor: an index past the end yields EBFrameDefault, which is also what a static exercise holds.
+EBPersonageFrame EBExerciseFrameAt(EBExercise exercise, NSUInteger index);
 
 @interface EBExercisePicker : NSObject
 
@@ -44,8 +58,8 @@ static const int EBNumExercises = 9; // exercises 1..9, matching the original's 
 
 @end
 
-// Port of ExcerciseAnim. Timeouts are reproduced exactly, including the quirk that
-// "look at the window" and "stretch" never animate.
+// Port of ExcerciseAnim, with the timeouts of the original kept exactly except for "stretch", which
+// the original never animated at all and which now cycles through real frames.
 @interface EBExerciseAnimation : NSObject
 
 - (instancetype)initWithExercise:(EBExercise)exercise NS_DESIGNATED_INITIALIZER;
@@ -54,18 +68,10 @@ static const int EBNumExercises = 9; // exercises 1..9, matching the original's 
 @property(nonatomic, readonly) EBExercise exercise;
 @property(nonatomic, readonly, nullable) NSImage *image;
 
-// The second layer of the neck and shoulders exercise: the head, drawn separately from the torso so
-// the two can move independently. Nil for every other exercise, which is what tells the panel to
-// lay out a single image instead of a pair.
-@property(nonatomic, readonly, nullable) NSImage *headImage;
-
 // Offsets the artwork must be drawn at, on top of its position in the panel. Identity for every
 // exercise that swaps artwork instead of moving it. CATransform3D rather than CGAffineTransform
 // because it is assigned straight to CALayer.transform.
 @property(nonatomic, readonly) CATransform3D transform;
-// Applied to the head layer, which pivots at its own bottom edge so a rotation reads as tilting at
-// the neck rather than spinning the face.
-@property(nonatomic, readonly) CATransform3D headTransform;
 
 // Call once per 100 ms.
 - (void)advance;
