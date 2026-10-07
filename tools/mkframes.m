@@ -29,10 +29,20 @@ static const long kMinBlobPixels = 32;
 
 // A bubble reserves this much room: 71x44 pt, so every stored bitmap is twice that.
 static const double kPanelArtW = 71.0, kPanelArtH = 44.0;
-static const double kArtScale = 2.0;
+
+// The scale every target below is multiplied by, and the short break art slot.
+//
+// Both are overridable from the environment so the same tool can emit 1x bitmaps for the Windows port
+// of EyeLeo, which is a different program with two constraints this one does not have: wxBitmap uses a
+// PNG's pixel size as-is, so there is no halving step to rely on, and its portrait has to fit a
+// narrower slot (the Windows panel puts the exercise text at x=183, leaving 165x118 from the portrait's
+// origin at x=18). The defaults are the macOS values, so existing invocations are unaffected.
+static double gArtScale = 2.0;
+static double gShortArtW = 178.0, gShortArtH = 110.0;
 
 // The short break panel is 461x156, with the exercise art capped at this.
-static const double kShortArtW = 178.0, kShortArtH = 110.0;
+#define kShortArtW gShortArtW
+#define kShortArtH gShortArtH
 
 // The long break screen shows a figure up to this tall, less what the tip, clock and Skip button need.
 static const double kLongArtMaxH = 340.0, kLongReservedBelow = 386.0;
@@ -638,7 +648,7 @@ static void RunFull(NSString *inDir, NSString *outDir) {
     // Cap the whole set so the figure stays within what the long break screen can give it: it starts 200pt
     // from the top and the tip, clock and Skip button need about 250pt below. The stored bitmaps are twice
     // this, so the ceiling here is in the doubled space.
-    long capH = lround(MIN(kLongArtMaxH, MAX(120.0, 1200.0 - kLongReservedBelow)) * kArtScale);
+    long capH = lround(MIN(kLongArtMaxH, MAX(120.0, 1200.0 - kLongReservedBelow)) * gArtScale);
     if (canvasH > capH) {
         double shrink = (double)capH / canvasH;
         for (int i = 0; i < 3; i++)
@@ -708,10 +718,16 @@ static void RunFull(NSString *inDir, NSString *outDir) {
     }
     if (calfOut[0] > 0) {
         printf("  голень после сборки: %ld / %ld / %ld px\n", calfOut[0], calfOut[1], calfOut[2]);
+        // The calf is a narrow feature: on a 2x bitmap it is around 40 px wide and 6% is nearly three
+        // pixels of slack, but the same 6% of a 20 px calf at 1x is barely one pixel, and rounding in
+        // the resampler then trips a check that has nothing to do with alignment. So the tolerance has
+        // a floor of two pixels' worth. It is still far tighter than the figure visibly changing size,
+        // which is what this check is for.
+        double tol = MAX(0.06, 2.0 / (double)MAX(calfOut[0], 1L));
         for (int i = 1; i < 3; i++) {
-            double d = (double)calfOut[i] / (double)calfOut[0];
-            if (d < 0.94 || d > 1.06)
-                Fail(@"%@: голень в результате отличается в %.2f раза (допуск 0.94..1.06)", f[i].outName, d);
+            double d = (double)calfOut[i] / (double)MAX(calfOut[0], 1L);
+            if (d < 1.0 - tol || d > 1.0 + tol)
+                Fail(@"%@: голень в результате отличается в %.2f раза (допуск %.3f)", f[i].outName, d, tol);
         }
     }
     for (int i = 0; i < 3; i++)
@@ -728,8 +744,8 @@ static void RunBust(NSString *inDir, NSString *outDir) {
         !LoadFrame(&f[1], inDir, @"stretch_up.png", @"leopard_stretch_up.png") ||
         !LoadFrame(&f[2], inDir, @"stretch_upper.png", @"leopard_stretch_upper.png"))
         return;
-    long targetW = lround(kShortArtW * kArtScale);
-    long targetH = lround(kShortArtH * kArtScale);
+    long targetW = lround(kShortArtW * gArtScale);
+    long targetH = lround(kShortArtH * gArtScale);
 
     // The three frames already agree on scale: measured on the leg they are 51, 50 and 51 px across.
     // So nothing needs rescaling to match and the only thing to find is where each head starts, which
@@ -826,8 +842,8 @@ static void RunEyes(NSString *inDir, NSString *outDir) {
     if (!LoadFrame(&f[0], inDir, @"open.png", @"leopard_eyes_open.png") ||
         !LoadFrame(&f[1], inDir, @"close.png", @"leopard_eyes_closed.png"))
         return;
-    long targetW = lround(kOriginalHeadW * kArtScale);
-    long targetH = lround(kOriginalHeadH * kArtScale);
+    long targetW = lround(kOriginalHeadW * gArtScale);
+    long targetH = lround(kOriginalHeadH * gArtScale);
     for (int i = 0; i < 2; i++) {
         EBFrame *fr = &f[i];
         long span = fr->box.y1 - fr->box.y0;
@@ -915,8 +931,8 @@ static void CompositeOver(EBBitmap *dst, const EBBitmap *src, long atX, long atY
 static void RunShoulders(NSString *inDir, NSString *outDir) {
     static const char *kIn[2] = {"shoulders_up.png", "shoulders_down.png"};
     static const char *kOut[2] = {"leopard_shoulders_up.png", "leopard_shoulders_down.png"};
-    long slotW = lround(kShortArtW * kArtScale);
-    long slotH = lround(kShortArtH * kArtScale);
+    long slotW = lround(kShortArtW * gArtScale);
+    long slotH = lround(kShortArtH * gArtScale);
 
     EBFrame f[2];
     int loaded = 0;
@@ -1035,8 +1051,8 @@ static void RunCups(NSString *inDir, NSString *outDir) {
         {"water.png", "tea_water.png"},
     };
     // The slot in the bubble, at 2x.
-    long slotW = lround(kPanelArtW * kArtScale);
-    long slotH = lround(kPanelArtH * kArtScale);
+    long slotW = lround(kPanelArtW * gArtScale);
+    long slotH = lround(kPanelArtH * gArtScale);
 
     long tallest = 0, widest = 0;
     for (size_t i = 0; i < sizeof(kMap) / sizeof(kMap[0]); i++) {
@@ -1092,6 +1108,26 @@ int main(int argc, const char **argv) {
             return 2;
         }
         NSString *mode = @(argv[1]), *inDir = @(argv[2]), *outDir = @(argv[3]);
+
+        // Optional, and only needed when generating for the Windows port: see the declarations.
+        struct { const char *name; double *slot; } overrides[] = {
+            {"EYELEO_ART_SCALE", &gArtScale},
+            {"EYELEO_SHORT_ART_W", &gShortArtW},
+            {"EYELEO_SHORT_ART_H", &gShortArtH},
+        };
+        for (size_t i = 0; i < sizeof(overrides) / sizeof(overrides[0]); i++) {
+            const char *raw = getenv(overrides[i].name);
+            if (!raw || !*raw)
+                continue;
+            double value = atof(raw);
+            if (!(value > 0.0)) {
+                fprintf(stderr, "  FAIL  %s=%s не положительное число\n", overrides[i].name, raw);
+                return 2;
+            }
+            *overrides[i].slot = value;
+        }
+        printf("== %s  (scale %.3g, short slot %.3gx%.3g)\n", mode.UTF8String, gArtScale, gShortArtW,
+               gShortArtH);
         [[NSFileManager defaultManager] createDirectoryAtPath:outDir
                                   withIntermediateDirectories:YES
                                                    attributes:nil
