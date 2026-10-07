@@ -14,14 +14,47 @@ make test       # core state machine unit tests, no window server needed
 make run        # build, then launch
 make smoke      # end-to-end: unit tests, localization, menu bar item, and both break cycles
 make measure    # size, cold start, footprint, and a security summary
+make install    # copy the built app to /Applications
+make uninstall  # remove it from there again
 ```
 
 Requires only the Xcode command line tools. There are no third-party dependencies: no CocoaPods,
 no Swift package, no wxWidgets. pugixml is not needed either, because the original only used it to
 read two small XML files.
 
-Move `build/EyeLeo.app` to `/Applications` before enabling **Open at login**, otherwise
-LaunchServices cannot register a reliable login item.
+## Installing
+
+```
+make install                  # build, then copy build/EyeLeo.app into /Applications
+open /Applications/EyeLeo.app
+make uninstall                # remove it again
+```
+
+There is no `.dmg` and no installer: an ad-hoc signed bundle that the user drags into `/Applications`
+is the whole distribution, which is also why `make install` is a copy rather than a package. Override
+the destination to exercise the target without touching the system: `make install DESTDIR=/tmp/check`.
+
+Three details in that target are not incidental. It refuses to run while EyeLeo is up, because the app
+exits silently if a second instance starts and because overwriting the directory under a live process
+leaves it reading a bundle that is no longer there; the guard matches the executable inside any bundle,
+so it catches a running copy from `build/` and from `/Applications` alike. It removes the old bundle
+before copying, because `ditto` merges into an existing directory and would otherwise leave files that
+the new build no longer contains. And it verifies the signature afterwards, since copying is the step
+that can break it.
+
+If `/Applications` is not writable it suggests `sudo ditto build/EyeLeo.app /Applications/EyeLeo.app`
+rather than `sudo make install`, on purpose: the latter would compile as root and leave root-owned
+artifacts in `build/`.
+
+Settings and `tea.conf` live in `~/Library/Containers/local.eyeleo.EyeLeo`, keyed by bundle identifier
+rather than by path, so installing, replacing or moving the app leaves them alone. `make uninstall`
+deliberately does not remove that directory.
+
+Enable **Open at login** only once the app is in `/Applications`. It registers the main bundle through
+`SMAppService`, and a bundle sitting in `build/` is not something LaunchServices will register reliably.
+
+Note that `make run` launches the copy in `build/`, so running it while the installed copy is up is
+exactly the two-instance case the install guard complains about.
 
 ## Why Objective-C and not Swift
 
@@ -409,7 +442,8 @@ the answer turned out to be in the tool.
 - **Logging is gone.** The original wrote every state change to `log.txt` by reopening the file each
   time. `os_log` is used instead, for real problems only.
 - **No installer.** NSIS, the `.manifest` file it referenced and the MSVC runtime DLLs have no
-  equivalent here. The app is a bundle you drag to `/Applications`.
+  equivalent here. `make install` copies the ad-hoc signed bundle into `/Applications`, which is the
+  whole of the distribution; no `.dmg`, no package, nothing to mount.
 - **No `config.xml` in the working directory.** The original loaded its language and version from a
   file relative to the process working directory, which broke if you launched it from anywhere else.
   Language now follows the system and assets live in the bundle.
