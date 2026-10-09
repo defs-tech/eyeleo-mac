@@ -50,13 +50,14 @@ typedef NS_ENUM(int, EBDrinkKind) {
     EBDrinkWhite,   // white tea
     EBDrinkOolong,
     EBDrinkBlack,
+    EBDrinkRed,
     EBDrinkPuer,
     EBDrinkHerbal,
     EBDrinkWater,   // the hydration reminder, not tea
 };
 
 // How many kinds exist, counting the water. drinkImage: indexes its array with the raw value.
-enum { EBNumDrinks = 7 };
+enum { EBNumDrinks = 8 };
 
 @interface EBAssets : NSObject
 

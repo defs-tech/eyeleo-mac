@@ -764,11 +764,11 @@ static void TestDrinkVessels(void) {
     // Seven vessels, one per drink. A missing file would leave the reminder with an empty gap where the
     // glass goes, and the tea types would all look the same, so check the files the way the frames were
     // checked: in the source tree, because the test binary is not the bundle.
-    Check(EBNumDrinks == 7, @"seven drinks");
+    Check(EBNumDrinks == 8, @"eight drinks");
     NSString *root = [@(__FILE__) stringByDeletingLastPathComponent];
     root = [root stringByDeletingLastPathComponent];
-    static NSString *const kDrinks[7] = { @"tea_green", @"tea_white", @"tea_oolong", @"tea_black",
-                                          @"tea_puer", @"tea_herbal", @"tea_water" };
+    static NSString *const kDrinks[8] = { @"tea_green", @"tea_white", @"tea_oolong", @"tea_black",
+                                          @"tea_red", @"tea_puer", @"tea_herbal", @"tea_water" };
     for (int i = 0; i < EBNumDrinks; i++) {
         NSString *path = [root stringByAppendingPathComponent:
                                        [@"Resources" stringByAppendingPathComponent:
@@ -827,7 +827,7 @@ static void TestTeaConfigAndSession(void) {
     // With no tea.conf on disk the built-in schedule has to be returned rather than an empty set, since a
     // fresh install has nothing configured and the feature still has to work.
     EBTeaConfig cfg = EBLoadTeaConfig();
-    Check(cfg.count >= 6, @"defaults cover the six teas");
+    Check(cfg.count >= 7, @"defaults cover the seven teas");
 
     // The defaults are the researched ones, so check a couple of them rather than only that something
     // parsed: the point of the table is that the numbers were looked up.
@@ -840,6 +840,11 @@ static void TestTeaConfigAndSession(void) {
     CheckEq(cfg.schemes[puer].seconds[7], 90, @"last pu-erh steep is 90 s");
     int herbal = (int)EBDrinkHerbal - 1;
     CheckEq(cfg.schemes[herbal].seconds[0], 300, @"herbal first steep is 300 s");
+    int red = (int)EBDrinkRed - 1;
+    Check(cfg.schemes[red].count == 6, @"red tea has six steeps");
+    CheckEq(cfg.schemes[red].temperatureC, 95, @"red tea is 95 C");
+    CheckEq(cfg.schemes[red].seconds[0], 7, @"first red steep is 7 s");
+    CheckEq(cfg.schemes[red].seconds[5], 30, @"last red steep is 30 s");
 
     // Water has no steeping schedule, so there is nothing to brew.
     Check(cfg.schemes[(int)EBDrinkWater - 1].seconds == NULL, @"water has no schedule");

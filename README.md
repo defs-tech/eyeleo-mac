@@ -232,10 +232,11 @@ those two lists allow is 15 min x 250 ml = 1000 ml/hour, against the 1414 ml/hou
 NIOSH warns about water intoxication. No settings combination can breach it, and a test asserts it.
 
 **A tea timer, with water as one more kind of it.** The same bubble, the same menu, the same countdown,
-so water is the tea menu's first entry rather than a second feature. Six teas ship with the usual steep
-times, white and green 10-15-20-25-30, oolong 15-25-35-45-60-75, black 20-30-40-50-60-70, puer
-20-30-40-50-60-70-80-90 and herbal 300-360-420-480, all in seconds. They live in `tea.conf` next to
-`settings.xml`, which is edited through the app rather than by hand in the container.
+so water is the tea menu's first entry rather than a second feature. Seven teas ship with the usual
+steep times, white and green 10-15-20-25-30, oolong 15-25-35-45-60-75, black 20-30-40-50-60-70, red
+7-10-15-20-25-30 at 95 C, puer 20-30-40-50-60-70-80-90 and herbal 300-360-420-480, all in seconds.
+They live in `tea.conf` next to `settings.xml`, which is edited through the app rather than by hand in
+the container.
 
 Steeping is deliberately manual. An automatic timer cannot know when you have actually poured the water
 off the leaves, so a countdown would be wrong for anyone who looks away, and the fix for that is a

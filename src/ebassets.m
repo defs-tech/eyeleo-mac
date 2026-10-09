@@ -122,7 +122,8 @@ static const double kRetinaScale = 2.0;
 
 // Indexed by the raw enum value, as with the personage frames above.
 static NSString *const kDrinkNames[EBNumDrinks] = {
-    @"tea_green", @"tea_white", @"tea_oolong", @"tea_black", @"tea_puer", @"tea_herbal", @"tea_water",
+    @"tea_green", @"tea_white", @"tea_oolong", @"tea_black", @"tea_red", @"tea_puer", @"tea_herbal",
+    @"tea_water",
 };
 
 - (NSImage *)drinkImage:(EBDrinkKind)drink {

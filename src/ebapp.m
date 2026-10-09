@@ -434,7 +434,7 @@ static const long EBTeaReadyNoticeMs = 5000;
                                        keyEquivalent:@""];
     NSMenu *teaMenu = [[NSMenu alloc] init];
     static const EBDrinkKind kTeas[] = { EBDrinkGreen, EBDrinkWhite, EBDrinkOolong, EBDrinkBlack,
-                                         EBDrinkPuer, EBDrinkHerbal };
+                                         EBDrinkRed, EBDrinkPuer, EBDrinkHerbal };
     for (size_t i = 0; i < sizeof(kTeas) / sizeof(kTeas[0]); i++) {
         EBDrinkKind kind = kTeas[i];
         NSMenuItem *item = [teaMenu addItemWithTitle:EBTeaName(kind, EBRussianNow())

@@ -15,6 +15,7 @@ static const struct {
     { EBDrinkWhite, 85.0, { 10, 15, 20, 25, 30, 0, 0, 0 }, 5 },
     { EBDrinkOolong, 85.0, { 15, 25, 35, 45, 60, 75, 0, 0 }, 6 },
     { EBDrinkBlack, 90.0, { 20, 30, 40, 50, 60, 70, 0, 0 }, 6 },
+    { EBDrinkRed, 95.0, { 7, 10, 15, 20, 25, 30, 0, 0 }, 6 },
     { EBDrinkPuer, 99.0, { 20, 30, 40, 50, 60, 70, 80, 90 }, 8 },
     { EBDrinkHerbal, 100.0, { 300, 360, 420, 480, 0, 0, 0, 0 }, 4 },
 };
@@ -55,6 +56,8 @@ static EBDrinkKind KindForName(NSString *name) {
         return EBDrinkOolong;
     if ([n isEqualToString:@"black"] || [n isEqualToString:@"чёрный"] || [n isEqualToString:@"черный"])
         return EBDrinkBlack;
+    if ([n isEqualToString:@"red"] || [n isEqualToString:@"красный"] || [n isEqualToString:@"красн"])
+        return EBDrinkRed;
     if ([n isEqualToString:@"puer"] || [n isEqualToString:@"pu-er"] || [n isEqualToString:@"puerh"] ||
         [n isEqualToString:@"пуэр"])
         return EBDrinkPuer;
@@ -215,6 +218,7 @@ NSString *EBTeaName(EBDrinkKind kind, BOOL russian) {
     case EBDrinkWhite: return russian ? @"Белый чай" : @"White tea";
     case EBDrinkOolong: return russian ? @"Улун" : @"Oolong";
     case EBDrinkBlack: return russian ? @"Чёрный чай" : @"Black tea";
+    case EBDrinkRed: return russian ? @"Красный чай" : @"Red tea";
     case EBDrinkPuer: return russian ? @"Пуэр" : @"Pu-erh";
     case EBDrinkHerbal: return russian ? @"Травяной чай" : @"Herbal tea";
     case EBDrinkWater: return russian ? @"Вода" : @"Water";
