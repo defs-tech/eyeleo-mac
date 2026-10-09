@@ -384,6 +384,13 @@ static const long EBTeaReadyNoticeMs = 5000;
     self.statusItem.button.toolTip = NSLocalizedString(@"tb_popup_default", @"tooltip");
 
     self.menu = [[NSMenu alloc] init];
+    // NSMenu autoenables its items by default, which means AppKit decides who is clickable at every open
+    // and ignores what the builder assigned: any item with an implemented action comes back enabled. With
+    // nothing implementing NSMenuValidation, that took the Pour item's rule away from the line that
+    // computes it, and also the strict-mode lock below. Turning it off is what makes those assignments
+    // mean anything. Every action on this menu is implemented, so nothing is left clickable by default
+    // that would only beep.
+    self.menu.autoenablesItems = NO;
     self.menu.delegate = self;
     self.statusItem.menu = self.menu;
 
@@ -439,6 +446,7 @@ static const long EBTeaReadyNoticeMs = 5000;
                                               action:NULL
                                        keyEquivalent:@""];
     NSMenu *teaMenu = [[NSMenu alloc] init];
+    teaMenu.autoenablesItems = NO; // as above, for the same reason as the other two menus
     static const EBDrinkKind kTeas[] = { EBDrinkGreen, EBDrinkWhite, EBDrinkOolong, EBDrinkBlack,
                                          EBDrinkRed, EBDrinkPuer, EBDrinkHerbal };
     for (size_t i = 0; i < sizeof(kTeas) / sizeof(kTeas[0]); i++) {
@@ -476,6 +484,7 @@ static const long EBTeaReadyNoticeMs = 5000;
                                              action:NULL
                                       keyEquivalent:@""];
     NSMenu *submenu = [[NSMenu alloc] init];
+    submenu.autoenablesItems = NO; // as above: the strict-mode lock has to be able to reach these
     [submenu addItemWithTitle:NSLocalizedString(@"tb_menu_pause_monitoring_1", @"menu")
                        action:@selector(pauseForHour:)
                 keyEquivalent:@""];
