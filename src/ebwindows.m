@@ -219,6 +219,7 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
 - (void)stopFastTimer;
 - (void)stopSlowTimer;
 - (void)stopTimersIfIdle;
+- (BOOL)slowTickHasWork;
 - (void)restoreFocusIfHeld;
 - (void)stepFades;
 - (void)stopFade;
@@ -518,7 +519,7 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
                                             self.beforeReadySeconds];
     }
 
-    if (!self.countdownTime && !self.longClock && !self.beforeReadyButton && !self.waterTime)
+    if (![self slowTickHasWork])
         [self stopSlowTimer];
 }
 
@@ -1259,10 +1260,21 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
     return shield;
 }
 
+// Whether the one-second clock still has something left to advance. The tick asks this at its end and
+// the hide paths ask it before switching the clock off, and they have to ask it the same way. They did
+// not: this list was the clock's own, while stopTimersIfIdle's was shorter and left out the hydration
+// reminder and the before-break countdown. So a reminder whose bubble was still on screen had its clock
+// switched off underneath it, and the last seconds stayed frozen on screen for good, with nothing left
+// to take the bubble down.
+- (BOOL)slowTickHasWork {
+    return self.countdownTime != nil || self.longClock != nil || self.beforeReadyButton != nil ||
+           self.waterTime != nil;
+}
+
 - (void)stopTimersIfIdle {
     if (_shortBreakMsLeft <= 0 && !_beforeReadyButton)
         [self stopFastTimer];
-    if (!_countdownTime && !_longClock)
+    if (![self slowTickHasWork])
         [self stopSlowTimer];
 }
 
