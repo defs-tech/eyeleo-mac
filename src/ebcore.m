@@ -590,10 +590,24 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
 
             long confirmMs = EBLongBreakConfirmationSec * 1000L;
 
+            // Brewing holds the rest of the app back, but only while a steep is nearly over. Read once
+            // per tick so that all four events below agree about it, and so that a steep that runs out
+            // mid-tick releases them all at once on the next.
+            BOOL brewing = [d teaBlocksEvents];
+            if (brewing && EBTraceOn())
+                fprintf(stderr, "[EB] holding events: a steep is nearly over\n");
+
             if (_settings.bigPauseEnabled && self.timeLeftToBigPause > 0) {
                 self.timeLeftToBigPause -= msElapsed * (_fastMode ? 8 : 1);
 
-                if (_settings.warningEnabled && _settings.warningInterval > 0 && !_showedLongBreakCountdown &&
+                // Held at the confirmation mark rather than left to fall past it. The block that owns it
+                // only runs while the counter is positive, so a counter left to keep falling while brewing
+                // goes out of the block entirely and the long break then never comes at all.
+                if (brewing && self.timeLeftToBigPause <= confirmMs)
+                    self.timeLeftToBigPause = confirmMs;
+
+                if (!brewing && _settings.warningEnabled && _settings.warningInterval > 0 &&
+                    !_showedLongBreakCountdown &&
                     self.timeLeftToBigPause <= (long)(_settings.warningInterval * 60 * 1000) &&
                     self.timeLeftToBigPause > confirmMs) {
                     // Show the countdown on the first display that a fullscreen app is not covering.
@@ -609,7 +623,7 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
                     }
                 }
 
-                if (self.timeLeftToBigPause <= confirmMs) {
+                if (!brewing && self.timeLeftToBigPause <= confirmMs) {
                     [self changeState:EBStateStartBigPause interval:100];
                     break;
                 }
@@ -618,7 +632,9 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
             if (_settings.miniPauseEnabled) {
                 if (self.timeLeftToMiniPause > 0)
                     self.timeLeftToMiniPause -= msElapsed * (_fastMode ? 2 : 1);
-                if (!_showedLongBreakCountdown && self.timeLeftToMiniPause <= 0) {
+                // No hold needed here: the counter only ever falls while it is positive, so a suppressed
+                // break simply sits at zero and fires on the first tick brewing allows.
+                if (!brewing && !_showedLongBreakCountdown && self.timeLeftToMiniPause <= 0) {
                     _stats.shortBreakCount++;
                     // The original does this at the tail of StartMiniPause(); without it the
                     // short break re-fires on every single tick.
@@ -639,11 +655,13 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
                 if (EBTraceOn() && _timeLeftToWaterMs < 120000)
                     fprintf(stderr, "[EB] water: %ld ms left\n", _timeLeftToWaterMs);
 
-                if (_timeLeftToWaterMs <= 0) {
-                    // The long-break countdown holds the same corner of the screen. Retrying a minute
-                    // later rather than stacking keeps the countdown, which is the more important of
-                    // the two notices, visible.
+                if (_timeLeftToWaterMs <= 0 && !brewing) {
+                    // Brewing holds this too: the counter is simply left at zero and the reminder arrives
+                    // on the first free tick, sooner than the minute below would have put it off by.
                     if ([d waterReminderDeferred]) {
+                        // The long-break countdown, or a break or a pot of tea, holds the same corner of
+                        // the screen. Retrying a minute later rather than stacking keeps the countdown,
+                        // which is the more important of the two notices, visible.
                         _timeLeftToWaterMs = 60 * 1000;
                     } else {
                         // One shot, cleared BEFORE the interval is recomputed. The hook exists so the

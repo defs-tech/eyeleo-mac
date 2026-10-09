@@ -1083,8 +1083,16 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
 // The long-break countdown owns the same corner, and the two timers are unrelated: a 50 minute break
 // interval and a 30 minute water interval coincide often enough that one will replace the other.
 // Declining rather than stacking keeps the countdown visible, which is the notice that matters more.
+//
+// The brewing bubble sits in that corner as well, and a short break covers the screen. Neither moves for
+// the water: the countdown would be replaced by a bottle of water, and a reminder shown behind something
+// else is a reminder not shown at all.
 - (BOOL)showWaterReminderDeferred {
-    return self.countdownVisible;
+    if (self.countdownVisible)
+        return YES;
+    if (self.teaWnd)
+        return YES;
+    return _shortBreakMsLeft > 0 || _shortBreakWnds.count > 0;
 }
 
 - (void)hideWaterReminder {

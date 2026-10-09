@@ -83,6 +83,9 @@ static void CheckEq(long got, long want, NSString *what) {
 @property(nonatomic) int nLastWaterSec;
 // Set by the test to simulate the long-break countdown owning the bottom-right corner.
 @property(nonatomic) BOOL waterDeferred;
+// Set by the test to stand in for a brewing steep that is nearly over. Off in every other test, so the
+// holding rule is inert unless a case asks for it.
+@property(nonatomic) BOOL teaBlocking;
 @property(nonatomic) int nSoundCount;
 @property(nonatomic) int nTerminateCount;
 @property(nonatomic) long nLastCountdownMs;
@@ -166,6 +169,10 @@ static void CheckEq(long got, long want, NSString *what) {
 
 - (BOOL)waterReminderDeferred {
     return _waterDeferred;
+}
+
+- (BOOL)teaBlocksEvents {
+    return _teaBlocking;
 }
 
 - (void)dismissShortBreak {
@@ -1092,6 +1099,46 @@ static void TestWaterReminder(void) {
     for (int i = 0; i < 60 * 60; i++)
         [c2 tickWithElapsedMs:1000];
     Check(rec.nPresentWater == 2, @"a disabled reminder stays silent");
+
+    // A brewing steep that is nearly over holds every one of the three. This is the rule that stops a
+    // reminder from landing on top of a tea countdown, and it is the same predicate for all three rather
+    // than three separate ones, so that brewing either holds the lot or none of it.
+    Recorder *r3 = nil;
+    EBCore *c3 = MakeCore(&r3);
+    EBSettings brew = c3.defaultSettings;
+    brew.bigPauseEnabled = YES;
+    brew.miniPauseEnabled = YES;
+    brew.waterReminderEnabled = YES;
+    brew.bigPauseInterval = 15;
+    brew.miniPauseInterval = 10;
+    brew.waterIntervalMin = 15;
+    brew.warningEnabled = NO;
+    c3.settings = brew;
+    [c3 startWithFirstLaunch:NO lastShutdown:0];
+
+    // The corner rule belongs to the overlay, not to the core, and the recorder is not an overlay, so
+    // water is deferred here for its own reason: what is under test is the brewing hold alone.
+    r3.waterDeferred = YES;
+    r3.teaBlocking = YES;
+    for (int i = 0; i < 15 * 60; i++)
+        [c3 tickWithElapsedMs:1000];
+    Check(r3.nPresentWater == 0, @"no hydration reminder while brewing holds events");
+    Check(r3.nPresentShortBreak == 0, @"no short break while brewing holds events");
+    Check(r3.nPresentLongBreak == 0, @"no long break while brewing holds events");
+
+    // Everything comes due on the very first tick once the steep is out of the way rather than being
+    // spread back over the intervals: the counters behind them were left at their limits, not rewound.
+    r3.teaBlocking = NO;
+    [c3 tickWithElapsedMs:1000];
+    // The long break is first in the branch and it leaves the branch as soon as it is asked for, so the
+    // short break behind it does not fire on this tick. It is not lost: its counter sits at zero and it
+    // goes off when the state comes back to idle. That order is the existing one, not the hold's doing.
+    Check(r3.nPresentLongBreak == 0, @"the long break is queued rather than presented in the same tick");
+    Check(r3.nPresentShortBreak == 0, @"the branch left before the short break behind it could fire");
+    [c3 tickWithElapsedMs:1000];
+    // Its first visible step, which outside strict mode is the before-break dialog; the break itself
+    // waits for that to be accepted. The point is that it arrives at all, right after brewing let go.
+    Check(r3.nPresentBeforeBreak == 1, @"the long break shows its dialog on the next tick");
 }
 
 static void TestGeometry(void) {

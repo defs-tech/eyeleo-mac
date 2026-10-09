@@ -36,6 +36,13 @@ static NSString *const kBundleID = @"local.eyeleo.EyeLeo";
 // bubble left on screen after the tea is brewed is the thing this whole change set out to remove.
 static const long EBTeaReadyNoticeMs = 5000;
 
+// How close a running steep has to be to its end before brewing is allowed to hold the rest of the app
+// back. A steep is a minute or two at most for every tea but the herbal one, and holding a break for the
+// sake of a countdown that is nearly over costs the user nothing. Past this, the brewing loses: the app
+// exists to get people out of their eyes, and a reminder that can be pushed back eight minutes by
+// starting a pot of chamomile is not doing its job.
+static const long EBTeaEventDeferCapSec = 150;
+
 @implementation EBAppDelegate
 
 #pragma mark - Launch
@@ -677,6 +684,17 @@ static const long EBTeaReadyNoticeMs = 5000;
 
 - (BOOL)waterReminderDeferred {
     return [_overlays showWaterReminderDeferred];
+}
+
+// Whether a brewing steep is close enough to its end to hold the rest of the app back.
+//
+// Awaiting counts as NOT blocking: the timer has already run out, the bubble is down, and how long the
+// leaf sits in the pot before the next pour is the pourer's business, not something to be polite about.
+// Nothing is brewing, so there is nothing to wait for.
+- (BOOL)teaBlocksEvents {
+    if (!EBTeaSessionValid(&_tea) || _tea.awaiting || _tea.finished)
+        return NO;
+    return _tea.msLeft <= EBTeaEventDeferCapSec * 1000L;
 }
 
 // A break takes the screen, so brewing gets out of its way. The session itself is kept rather than

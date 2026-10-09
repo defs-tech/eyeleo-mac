@@ -140,6 +140,10 @@ BOOL EBTraceOn(void);
 // owns the bottom-right corner, in which case the core must not present and should retry later.
 - (void)presentWaterReminderWithVolumeMl:(int)ml seconds:(int)seconds;
 - (BOOL)waterReminderDeferred;
+// YES while a brewing steep is close enough to its end to hold the short break, the hydration reminder and
+// the long break back. The core asks this before presenting any of them and simply waits: the counters
+// behind those are written so that holding them costs nothing and they fire on the first free tick.
+- (BOOL)teaBlocksEvents;
 - (void)dismissShortBreak;
 - (void)updateStatusTitle:(NSString *)title isPaused:(BOOL)paused;
 - (void)postNotificationKey:(NSString *)key duration:(nullable NSString *)duration;

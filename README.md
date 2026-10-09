@@ -249,6 +249,14 @@ Two things the timer does not do. It does not stop for a break, because a steep 
 user is looking at a screen is a bug, not a courtesy; and it does not remember the chosen tea on the next
 launch, so the tick mark is about this session only. Both were choices, not omissions.
 
+The reverse also holds. While a steep is running, the short break, the hydration reminder and the long
+break all wait: none of them is announced, and nothing is stacked on top of the brewing countdown. A
+steep is short — thirty seconds for a green tea, a minute and a half for a pu-erh — and holding a break
+for the sake of a countdown that is nearly over costs the user nothing. Once the steep has more than two
+and a half minutes left it stops being able to hold anything. That is the herbal schedule, whose steeps
+run five to eight minutes: for it the app wins, the break comes as it should, and the brewing bubble is
+put away until the break is over. The session itself is never dropped, whatever happens.
+
 ## Reading settings written by other tools
 
 `PutBool` stores 0/1, so the app's own files are numbers where a flag is expected. That meant
