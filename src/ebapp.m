@@ -506,10 +506,15 @@ static const long EBTeaReadyNoticeMs = 5000;
                           action:@selector(quit:)
                    keyEquivalent:@"q"];
 
-    for (NSMenuItem *item in self.menu.itemArray)
-        item.enabled = !locked;
-    for (NSMenuItem *item in submenu.itemArray)
-        item.enabled = !locked;
+    // Strict mode takes everything away, and only ever subtracts: the rules above decide what is normally
+    // clickable. Assigning !locked instead also handed the Pour item its click back on every ordinary menu
+    // open, which is why it stayed live before a tea was chosen and during every steep.
+    if (locked) {
+        for (NSMenuItem *item in self.menu.itemArray)
+            item.enabled = NO;
+        for (NSMenuItem *item in submenu.itemArray)
+            item.enabled = NO;
+    }
 }
 
 - (void)refreshStatusItem {
