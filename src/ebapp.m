@@ -276,6 +276,12 @@ static const long EBTeaReadyNoticeMs = 5000;
     // The timer runs even while a break is up, so a steep can run out during one. That is the honest
     // reading: nobody poured anything during the break.
     if (EBTeaSessionAdvance(&_tea, elapsedMs)) {
+        // A steep ran out, the last one included. The same moment on Windows, and the same one sound:
+        // the leaves have given what they were going to give, and whether another pour follows is the
+        // pourer's decision rather than part of the event.
+        if (_core.settings.soundsEnabled)
+            [self playSteepEndSound];
+
         NSString *caption = EBTeaSessionCaption(&_teaConfig, &_tea, russian);
         if (_tea.finished) {
             // The last steep ran out: the tea is brewed. Say so once, briefly, then clear the screen.
@@ -745,6 +751,19 @@ static const long EBTeaReadyNoticeMs = 5000;
     // kSystemSoundID_UserPreferredAlert resolves to the user's chosen alert sound and needs no
     // permission; it is the macOS analogue of the Windows SystemExclamation alias.
     AudioServicesPlaySystemSound(kSystemSoundID_UserPreferredAlert);
+}
+
+- (void)playSteepEndSound {
+    // "Submerge" in the Russian settings is the system sound whose file is called Submarine: a low tone
+    // going under. Which of the two names is the right one is a translation detail, and the file is what
+    // exists, so Submarine is what is asked for. A named system sound rather than an alert ID, because
+    // there is no alert that means "a steep ran out" and the user is entitled to pick something else by
+    // changing the sound. Cached because a named sound is read off disk and a session asks for it once
+    // per steep, six to eight times.
+    static NSSound *steep = nil;
+    if (!steep)
+        steep = [NSSound soundNamed:@"Submarine"];
+    [steep play];
 }
 
 - (void)terminateApp {
