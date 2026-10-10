@@ -256,7 +256,20 @@ static NSString *LocalizedListItem(NSString *keyFormat, int index) {
     author.bordered = NO;
     author.drawsBackground = NO;
 
-    NSStackView *infoStack = [NSStackView stackViewWithViews:@[ info, statsLabel, author ]];
+    // The licence line is not decoration. CC BY-NC 4.0 makes attribution a condition rather than a
+    // courtesy, and the author already has a line of his own here; the terms sit under it so that a
+    // copy of the app carries both halves of the same notice.
+    NSTextField *license = [[NSTextField alloc] initWithFrame:NSZeroRect];
+    license.stringValue = NSLocalizedString(@"information_license", @"licence");
+    license.font = [NSFont systemFontOfSize:11];
+    license.textColor = NSColor.secondaryLabelColor;
+    license.editable = NO;
+    license.selectable = NO;
+    license.bezeled = NO;
+    license.bordered = NO;
+    license.drawsBackground = NO;
+
+    NSStackView *infoStack = [NSStackView stackViewWithViews:@[ info, statsLabel, author, license ]];
     infoStack.orientation = NSUserInterfaceLayoutOrientationVertical;
     infoStack.alignment = NSLayoutAttributeLeading;
     infoStack.spacing = 12;

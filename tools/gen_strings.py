@@ -7,13 +7,27 @@ identical. Keys not present there are added here with a comment saying so.
 Transformations applied to the imported strings:
   {n} -> a real newline (the original app did this substitution at load time)
   %s  -> %@     (printf-style placeholders do not work with NSString formatting)
+
+The source langpacks are not in this repository: they belong to the original EyeLeo project,
+whose licence this port inherits. Point --src at that checkout's bin/Langpacks directory. It
+used to be a hardcoded path to one machine, which told a reader nothing and worked nowhere
+else.
 """
 
+import argparse
 import os
 import xml.etree.ElementTree as ET
 
-SRC = "/Users/Def/Projects/eyeleoapp-master/bin/Langpacks"
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+
+
+def parse_args():
+    p = argparse.ArgumentParser(
+        description="Rebuild the .strings files from the original EyeLeo langpacks.")
+    p.add_argument(
+        "--src", metavar="DIR", required=True,
+        help="path to the original bin/Langpacks directory, the one holding langpack.en.xml")
+    return p.parse_args()
 
 
 def load(path):
@@ -304,6 +318,7 @@ def build(lang, src, extra_fill):
 
 
 if __name__ == "__main__":
+    SRC = parse_args().src
     en = load(os.path.join(SRC, "langpack.en.xml"))
     ru = load(os.path.join(SRC, "langpack.ru.xml"))
     ru.update(RU_EXTRA)

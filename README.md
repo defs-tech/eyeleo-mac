@@ -1,10 +1,70 @@
 # EyeLeo for macOS
 
-A native macOS rewrite of the EyeLeo tray application (Windows/C++/wxWidgets, CC BY-NC 4.0):
-it counts down to a long break, prompts you about it, and interrupts with short eye exercises.
-Same state machine, same features, same wording, rebuilt on AppKit for one laptop.
+**Русская версия этого документа: [READMEru.md](READMEru.md).**
 
-Runs on macOS 26.0 or newer, Apple silicon. Menu-bar only: no Dock tile, no app switcher entry.
+A native macOS port of the EyeLeo tray application (Windows/C++/wxWidgets): it counts down to a long
+break, prompts you about it, and interrupts with short eye exercises. Same state machine, same features,
+same wording, rebuilt on AppKit.
+
+Menu-bar only: no Dock tile, no app switcher entry.
+
+> **Credit to the original author.** EyeLeo was written by **Alexander Garustovich**
+> (<eyeleoapp@gmail.com>, <http://eyeleo.com>). This is his program, his design, his artwork and his
+> wording; everything here grew out of his code. Enormous thanks to him for building it and putting it
+> out under a free licence — without that, this port would not exist.
+> He has maintained and supported the project throughout: [Patreon](https://www.patreon.com/eyeleo),
+> which is where supporting him goes.
+
+Licensed under Creative Commons **Attribution-NonCommercial 4.0 International** (CC BY-NC 4.0), full
+text in [`LICENSE`](LICENSE). The program is non-commercial: you may use and modify it with attribution,
+but not sell it or ship it inside a commercial product. Because the licence requires the attribution to
+be kept, this port neither cancels nor replaces Alexander Garustovich's authorship.
+
+This is a port of [yamatao/eyeleoapp](https://github.com/yamatao/eyeleoapp), the original Windows
+version in C++ and wxWidgets. See [Provenance](#provenance) for exactly what came from where.
+
+## Requirements and downloads
+
+Releases target **macOS 13.0 or newer, on Apple silicon and Intel alike** — the published app is a
+universal binary. A build from source on your own machine produces whatever that machine is, which is
+usually what you want for your own Mac.
+
+Prebuilt builds are attached to each [release](https://github.com/defs-tech/eyeleo-mac/releases). They
+are ad-hoc signed, not notarised, because notarisation needs a paid Apple Developer account. **macOS will
+therefore refuse the first launch and you have to allow it once**, by right-clicking the app and choosing
+*Open*, or *System Settings → Privacy & Security → Open Anyway*. After that it runs like any other app.
+There is no `.dmg`: unzip, drag to `/Applications`.
+
+## What it does
+
+Everything the original 1.3.6 did, unchanged and in full:
+
+- a menu bar with Settings, *Disable breaks for* (1 hour / 3 hours), *Take a long break now*,
+  *Open at login*, Quit;
+- the state machine ported one-for-one, including the six-second "are you ready" beat before a long
+  break, the eight-minute inactivity auto-relax, the fullscreen-blocked retry that gives up after five
+  minutes, and resuming a countdown across a restart if the machine was away for less than thirty
+  minutes;
+- long break: full screen, black, leopard, a rotating tip, a clock that always shows seconds, and a
+  Skip button that strict mode removes;
+- short break: the original `skin2` panel with a random exercise, an animation, a countdown, an
+  optional fullscreen mode, and dismissal by right click when that setting is on;
+- seven exercises with the "never twice in a row" rule and the original's animation timings;
+- the milestone asides at short-break counts 30, 80, 120, 150, 400, 600, 1000 and 1400;
+- pause and resume, single instance, statistics;
+- English and Russian, with correct Russian plurals.
+
+Added in the port, in short:
+
+- **Three more exercises**, ids 8, 9 and 10, with five phrasings each in both languages.
+- **A hydration reminder**, on the same interval idea as a tea timer, with seven vessels and a
+  configurable portion. Advisory only; it never takes input.
+- **A tea timer with manual steeps.** Seven teas with real steep times, and water as one more kind of
+  it, so "drink water" and "brew tea" are one menu rather than two features.
+- **Sounds** on the end of a break and the end of every steep, under the setting that already existed.
+- **Strict mode**, which removes the Skip button and refuses to open the tray menu during a break.
+
+The long version of all of that is further down, in [What was added in the port](#what-was-added-in-the-port).
 
 ## Build and run
 
@@ -21,6 +81,22 @@ make uninstall  # remove it from there again
 Requires only the Xcode command line tools. There are no third-party dependencies: no CocoaPods,
 no Swift package, no wxWidgets. pugixml is not needed either, because the original only used it to
 read two small XML files.
+
+Two variables change what gets built, and both default to what a local build wants: this machine's
+architecture and the system version it is running.
+
+```
+make ARCHS="arm64 x86_64"          # a universal binary instead of just this machine's slice
+make DEPLOYMENT_TARGET=13.0        # build against macOS 13 rather than 26
+make ARCHS="arm64 x86_64" DEPLOYMENT_TARGET=13.0
+```
+
+The release workflow sets both, because a published app should run on more than the machine that built
+it. Neither requires a source change: the newest API here is `SMAppService`, which is macOS 13, so a
+lower target compiles without touching anything, and the SDK on a runner has both slices to link
+against. Note what this does *not* prove — that the app was built for 13 and links both
+architectures is a fact the build reports; that it behaves correctly on macOS 13 or on an Intel Mac is
+something only running it there can show.
 
 ## Installing
 
@@ -160,7 +236,7 @@ corrupted settings file: below 6 seconds the notice would have no time to count 
 ## What was added in the port
 
 The original had seven exercises and that is still true of exercises 1..7: same ids, same wording in
-both languages, same artwork. Nothing was removed or reworded. Three things were added.
+both languages, same artwork. Nothing was removed or reworded. Five things were added.
 
 **Three exercises, ids 8, 9 and 10.** "Close your eyes fully and gently, ten times" holds the closed-eyes
 frame longer than the open one, because the point is a complete unhurried blink rather than a fast one.
@@ -525,8 +601,8 @@ tools/measure.sh      the numbers above
 tools/check_strings.m localization coverage and plural spot-checks
 tools/windows.m       lists on-screen windows (bounds only; needs no permission)
 tools/smoke.sh       end-to-end check of the built app, not just the core
-tests/                499 checks over the core state machine, the overlay geometry, the settings file and
-                      the generated artwork, plus a localization coverage check over 176 keys
+tests/                513 checks over the core state machine, the overlay geometry, the settings file and
+                      the generated artwork, plus a localization coverage check over 179 keys
 ```
 
 ## Tests
@@ -540,8 +616,7 @@ appears on screen fails the build and not just a unit.
 
 ## Provenance
 
-The Windows original by Alexander Garustovich is CC BY-NC 4.0 (see `license.txt` in the original
-repository). Its assets, wording and behaviour are reused here under that licence, so this build is
+The Windows original by Alexander Garustovich is CC BY-NC 4.0; its full text is [`LICENSE`](LICENSE). Its assets, wording and behaviour are reused here under that licence, so this build is
 non-commercial and must keep the attribution. `Resources/` starts as a copy of the original
 `bin/Resources` and `bin/Personages`; the personage frames from `leopard_shoulders_up` up and all the
 tea vessels are generated for this port by `tools/mkframes.m` and are covered by the same licence. The

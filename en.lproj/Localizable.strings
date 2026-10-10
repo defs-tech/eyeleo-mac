@@ -46,7 +46,7 @@
 "settings_try_long_break_button" = "Try long break";
 "information_info_1" = "It helps you to care about your health when you are sitting in front of a computer.\nIt reminds you to have regular breaks so that you could take a rest for your eyes, move your body and relax.";
 "information_author" = "Author: Alexander Garustovich";
-"information_license" = "";
+"information_license" = "Licensed under CC BY-NC 4.0: reuse and modification are welcome with attribution, for non-commercial use only.";
 "mini_pause_text_settings" = "Did you know that you could change EyeLeo preferences?";
 "mini_pause_text_posture" = "Keep your posture straight.";
 "before_pause_text" = "It's time for a long break!\nAre you ready?";
