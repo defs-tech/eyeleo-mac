@@ -30,13 +30,30 @@ RESOURCES := $(wildcard Resources/*.png) $(wildcard Resources/*.icns) $(wildcard
 LOCALES := $(wildcard en.lproj/*.strings) $(wildcard ru.lproj/*.strings)
 
 CC := clang
+
+# What the release builds are made for, as opposed to what a local build makes. A local build keeps the
+# defaults, so `make` on any machine keeps producing what it always did; the release workflow overrides
+# both. Nothing here needs a source change: the newest API in the project is SMAppService, which is
+# macOS 13, and there are no third-party dependencies at all, only system frameworks.
+#
+# ARCHS left empty means "whatever this machine is", which is what a build for your own Mac wants. A
+# universal build passes both, and the runner's SDK has both slices to link against, so nothing extra
+# has to be installed for it.
+ARCHS              ?=
+DEPLOYMENT_TARGET ?= 26.0
+
+ifneq ($(strip $(ARCHS)),)
+ARCH_FLAGS := $(foreach a,$(ARCHS),-arch $(a))
+endif
+
 # -Os rather than -O2: this binary is loaded once and runs for hours, so code size is worth more
 # than a fraction of a percent of speed. No Swift, so no runtime to drag in.
-CFLAGS := -std=gnu11 -Os -fobjc-arc -mmacosx-version-min=26.0 \
+CFLAGS := -std=gnu11 -Os -fobjc-arc -mmacosx-version-min=$(DEPLOYMENT_TARGET) \
           -Wall -Wextra -Wno-unused-parameter -Werror=incompatible-pointer-types \
           -fvisibility=hidden -funsigned-char \
+          $(ARCH_FLAGS) \
           -I src
-LDFLAGS := -Wl,-dead_strip
+LDFLAGS := -Wl,-dead_strip $(ARCH_FLAGS)
 FRAMEWORKS := -framework AppKit -framework CoreGraphics -framework QuartzCore \
               -framework AudioToolbox -framework ServiceManagement \
               -framework Foundation
@@ -49,6 +66,9 @@ $(APP_BUNDLE): $(SOURCES) $(HEADERS) Info.plist entitlements.plist $(RESOURCES) 
 	@rm -rf $(APP_BUNDLE)
 	@mkdir -p $(MACOS_DIR) $(RES_DIR)/Personages $(RES_DIR)/en.lproj $(RES_DIR)/ru.lproj
 	@cp Info.plist $(CONTENTS)/Info.plist
+	@# LaunchServices reads this key and refuses to launch the app on anything older, so it has to follow
+	@# DEPLOYMENT_TARGET rather than sitting at the local default. The source Info.plist is untouched.
+	@plutil -replace LSMinimumSystemVersion -string "$(DEPLOYMENT_TARGET)" $(CONTENTS)/Info.plist
 	@cp Resources/*.png Resources/*.icns $(RES_DIR)/
 	@cp Resources/Personages/*.png $(RES_DIR)/Personages/
 	@# the whole .lproj directory has to be copied: macOS only treats Resources/<lang>.lproj/ as
@@ -62,7 +82,7 @@ $(APP_BUNDLE): $(SOURCES) $(HEADERS) Info.plist entitlements.plist $(RESOURCES) 
 # The tests link the core against a stub detector, so they run without a window server.
 $(BUILD)/ebtest: tests/ebtest.m tests/ebdetect_stub.c src/ebcore.m src/ebtext.m src/ebgeometry.m src/ebassets.m src/ebexercise.m src/ebtea.m $(HEADERS)
 	@mkdir -p $(BUILD)
-	@$(CC) -std=gnu11 -O1 -g -fobjc-arc -mmacosx-version-min=26.0 -I src \
+	@$(CC) -std=gnu11 -O1 -g -fobjc-arc -mmacosx-version-min=$(DEPLOYMENT_TARGET) -I src \
 	    -Wall -Wextra -Wno-unused-parameter \
 	    -o $@ tests/ebtest.m tests/ebdetect_stub.c src/ebcore.m src/ebtext.m src/ebgeometry.m \
 	    src/ebassets.m src/ebexercise.m src/ebtea.m \
