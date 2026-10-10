@@ -1,0 +1,112 @@
+name: Build and release EyeLeo for macOS
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches:
+      - main
+    # A tag is what publishes a release. Every ordinary push stays a plain build-and-verify, because
+    # the release build is the slower one: it makes a universal binary rather than just this machine's.
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    # arm64, and therefore able to link the x86_64 slice as well. A runner that was itself Intel would
+    # produce the mirror-image problem.
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # What gets built, and against what. A local `make` keeps the defaults in the Makefile, which are
+      # this machine's architecture and the system version; the release widens both, so one asset runs
+      # on every Mac anyone is likely to be using.
+      #
+      # 13.0 is not a guess: SMAppService is the newest API in the project and it arrived in macOS 13.
+      # Nothing above that is called, and the compiler proves it rather than the README claiming it.
+      - name: Build and test (this runner's architecture)
+        run: |
+          make
+          make test
+          make smoke
+
+      - name: Build the release app
+        run: |
+          make ARCHS="arm64 x86_64" DEPLOYMENT_TARGET=13.0
+          lipo -info build/EyeLeo.app/Contents/MacOS/EyeLeo
+          codesign --verify --strict build/EyeLeo.app
+
+      - name: Package
+        run: |
+          # ditto rather than zip: it keeps the bundle's symlinks and extended attributes, and a plain
+          # zip of an .app is the usual way to end up with one macOS refuses to open.
+          ditto -c -k --sequesterRsrc --keepParent build/EyeLeo.app dist/EyeLeo-macOS.zip
+          ls -l dist
+
+      - name: Upload the build
+        uses: actions/upload-artifact@v4
+        with:
+          name: EyeLeo-macOS-App
+          path: dist/
+          if-no-files-found: error
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const { owner, repo } = context.repo;
+            const tag = context.ref.replace('refs/tags/', '');
+
+            // The notes live in the repository, one file per tag, rather than in this script: a body
+            // written here would be the same text for every version ever tagged, including the parts
+            // that only make sense for one of them, such as a version saying it is closed. The file is
+            // named for the tag and is read from the commit being published.
+            //
+            // A tag with no file of its own fails rather than publishing another version's text.
+            const notesPath = path.join('docs', 'release-notes', `${tag}.md`);
+            if (!fs.existsSync(notesPath))
+              throw new Error(`no release notes for ${tag}: expected ${notesPath}`);
+            const notes = fs.readFileSync(notesPath, 'utf8').trim();
+
+            let current = null;
+            try {
+              current = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+            } catch (err) {
+              if (err.status !== 404) throw err;
+            }
+
+            // A release that is already there has its body brought up to the file as well, so moving a
+            // tag to a later commit publishes a release that matches the commit it points at instead of
+            // new assets under old notes.
+            const release = current
+              ? await github.rest.repos.updateRelease({
+                  owner, repo, release_id: current.data.id, body: notes,
+                })
+              : await github.rest.repos.createRelease({
+                  owner, repo, tag_name: tag,
+                  name: 'EyeLeo for macOS ' + tag.replace(/^v/, ''),
+                  body: notes,
+                  draft: false, prerelease: false,
+                });
+
+            const files = fs.readdirSync('dist').filter(f => !fs.statSync(path.join('dist', f)).isDirectory());
+            for (const f of files) {
+              const assetName = f;
+              const existing = release.data.assets.find(a => a.name === assetName);
+              if (existing)
+                await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: existing.id });
+              await github.rest.repos.uploadReleaseAsset({
+                owner, repo, release_id: release.data.id,
+                name: assetName, data: fs.readFileSync(path.join('dist', f)),
+              });
+              core.info('published ' + assetName);
+            }
