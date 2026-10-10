@@ -24,23 +24,55 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # What gets built, and against what. A local `make` keeps the defaults in the Makefile, which are
-      # this machine's architecture and the system version; the release widens both, so one asset runs
-      # on every Mac anyone is likely to be using.
+      # One build, the one that gets published. CI has no architecture of its own worth testing: the
+      # local default is whatever machine the developer is on, and on a runner that is whatever the
+      # runner happens to be, which is not what anyone downloads. So the build here is exactly the
+      # release build, and the tests run against it.
+      #
+      # This also settles a version trap: the local default targets macOS 26, and a macos-15 runner
+      # carries an SDK that will not accept it, so a "build it locally first" step failed before it got
+      # as far as anything worth seeing.
       #
       # 13.0 is not a guess: SMAppService is the newest API in the project and it arrived in macOS 13.
       # Nothing above that is called, and the compiler proves it rather than the README claiming it.
-      - name: Build and test (this runner's architecture)
-        run: |
-          make
-          make test
-          make smoke
-
       - name: Build the release app
+        id: build
         run: |
-          make ARCHS="arm64 x86_64" DEPLOYMENT_TARGET=13.0
-          lipo -info build/EyeLeo.app/Contents/MacOS/EyeLeo
-          codesign --verify --strict build/EyeLeo.app
+          set -o pipefail
+          {
+            echo "### Build output"
+            make ARCHS="arm64 x86_64" DEPLOYMENT_TARGET=13.0 2>&1
+            lipo -info build/EyeLeo.app/Contents/MacOS/EyeLeo 2>&1
+            codesign --verify --strict build/EyeLeo.app && echo "signature OK"
+          } | tee build.log
+
+      # The log goes into the step summary as well as the artifact: a failed build that nobody can read
+      # is a build that cannot be diagnosed from outside.
+      - name: Publish the build log
+        if: always()
+        run: |
+          {
+            echo '```'
+            cat build.log 2>/dev/null || echo "the build did not get far enough to write a log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: warn
+
+      - name: Test
+        run: make DEPLOYMENT_TARGET=13.0 test
+
+      # Two minutes, because it waits on real timers. It needs a window server to put overlays on, which
+      # a runner has, but it is the step most likely to fail for environmental reasons rather than real
+      # ones, so it runs last and on its own.
+      - name: Smoke test
+        run: make smoke
 
       - name: Package
         run: |
