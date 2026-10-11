@@ -149,6 +149,13 @@
 "tb_menu_new_tea" = "New tea";
 "tb_menu_open_at_login" = "Open at login";
 "tb_menu_pour" = "Pour";
+"tea_name_black" = "Black tea";
+"tea_name_green" = "Green tea";
+"tea_name_herbal" = "Herbal tea";
+"tea_name_oolong" = "Oolong";
+"tea_name_puer" = "Pu-erh";
+"tea_name_red" = "Red tea";
+"tea_name_white" = "White tea";
 "time.too_many_hours" = "more than an hour";
 "unit.hour.few" = "hours";
 "unit.hour.many" = "hours";

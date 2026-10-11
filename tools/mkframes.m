@@ -1032,7 +1032,15 @@ static void RunShoulders(NSString *inDir, NSString *outDir) {
 
 #pragma mark - Cups
 
-// The seven vessels, one per drink.
+// The vessels that ship with the app: one per built-in tea, plus the water glass.
+//
+// This is a one-time conversion of the original EyeLeo artwork, not the app's list of teas. The map is
+// from the filenames the Windows build happens to use to the ones this build looks up by the name in
+// tea.conf, and a tea added to tea.conf has no entry here because its vessel is not cut from the Windows
+// artwork: it is a PNG of its own, dropped in at tea_<name>.png and checked when it loads.
+//
+// The loop below already skips a source it cannot find, so a partial run is a partial result rather than a
+// failure.
 //
 // These come out with a real alpha channel rather than a coloured background, so there is nothing to key
 // and no colour that could survive at the rim. All this mode does is cut each one to its own content and

@@ -149,6 +149,13 @@
 "tb_menu_new_tea" = "Новый чай";
 "tb_menu_open_at_login" = "Запускать при входе";
 "tb_menu_pour" = "Пролив";
+"tea_name_black" = "Чёрный чай";
+"tea_name_green" = "Зелёный чай";
+"tea_name_herbal" = "Травяной чай";
+"tea_name_oolong" = "Улун";
+"tea_name_puer" = "Пуэр";
+"tea_name_red" = "Красный чай";
+"tea_name_white" = "Белый чай";
 "time.too_many_hours" = "больше часа";
 "unit.hour.few" = "часа";
 "unit.hour.many" = "часов";
