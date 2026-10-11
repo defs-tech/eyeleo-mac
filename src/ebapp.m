@@ -26,6 +26,12 @@ static NSString *const kBundleID = @"local.eyeleo.EyeLeo";
 @property(nonatomic) uint64_t lastTickNanos;
 @property(nonatomic) BOOL reportedFirstTick;
 
+// Whether there is a foreground session to take the keyboard from. Starts YES because that is the state
+// the app is launched into, and the only thing that turns it off is the screen being locked or the session
+// switched away. Tracked from the notifications rather than asked for, because asking means a call into
+// the window server on every break, and the answer cannot change between two notifications.
+@property(nonatomic) BOOL sessionActive;
+
 // Brewing state. Held by value rather than as an object: it is a handful of integers, it is copied into
 // the tick handler, and nothing outside this file needs to reach through a reference to read it.
 @property(nonatomic) EBTeaConfig teaConfig;
@@ -62,6 +68,10 @@ static const long EBTeaEventDeferCapSec = 150;
     _overlays = [[EBOverlayController alloc] init];
     _core.delegate = self;
     _overlays.delegate = self;
+    // A BOOL property is NO until something sets it, and a session-less start is not the normal case.
+    // Set before the observers are registered, so a lock that arrives in the first moments is caught.
+    self.sessionActive = YES;
+    _overlays.sessionActive = YES;
 
     // The original shipped with _fastMode as a commented-out switch. Here the debugging aids are
     // environment variables so a full cycle of breaks can be watched without recompiling:
@@ -215,6 +225,17 @@ static const long EBTeaEventDeferCapSec = 150;
            selector:@selector(willSleep)
                name:NSWorkspaceWillSleepNotification
              object:nil];
+    // The screen being locked is not sleep, so nothing above reports it. What it changes is who is in
+    // front, and that is what a break arriving at that moment would otherwise remember and try to hand
+    // focus back to.
+    [nc addObserver:self
+           selector:@selector(sessionResigned)
+               name:NSWorkspaceSessionDidResignActiveNotification
+             object:nil];
+    [nc addObserver:self
+           selector:@selector(sessionBecameActive)
+               name:NSWorkspaceSessionDidBecomeActiveNotification
+             object:nil];
 
     // A display change invalidates every cached layout, so drop the overlays.
     [NSNotificationCenter.defaultCenter addObserver:self
@@ -226,6 +247,19 @@ static const long EBTeaEventDeferCapSec = 150;
 // Mirrors EyeApp::OnSessionUnlock: restart both intervals rather than resuming a timer that
 // was counting down while the machine was asleep.
 - (void)didWake {
+    // Rebase the elapsed-time origin before anything else looks at it.
+    //
+    // The scheduler measures elapsed time from the previous tick, and no tick happens while the machine
+    // is asleep, so the first tick after a wake carries the whole sleep in one number. resumeFromPause
+    // has just restarted the break intervals at their full length, and that number would then be
+    // subtracted from them, putting both straight past zero and firing a long break on the spot. The
+    // restart and the accounting for the sleep were each right on their own and cancelled each other.
+    //
+    // What the user asked for is the break intervals starting over from the moment of waking, and the
+    // hydration reminder carrying on from where it was. Rebasing the origin gives exactly that: the
+    // intervals keep the full length they were just given, and the reminder, which resumeFromPause does
+    // not touch, is not credited with the sleep either.
+    self.lastTickNanos = [self nowNanos];
     [_core resumeFromPause];
     [self refreshStatusItem];
 }
@@ -233,6 +267,16 @@ static const long EBTeaEventDeferCapSec = 150;
 - (void)willSleep {
     [_overlays hideAll];
     [_core saveSettings];
+}
+
+- (void)sessionResigned {
+    self.sessionActive = NO;
+    _overlays.sessionActive = NO;
+}
+
+- (void)sessionBecameActive {
+    self.sessionActive = YES;
+    _overlays.sessionActive = YES;
 }
 
 - (void)screenParametersChanged {

@@ -1185,6 +1185,61 @@ static void TestTeaConfigAndSession(void) {
     EBTeaConfigFree(&cfg);
 }
 
+static void TestWakeRestartsBreaksNotWater(void) {
+    printf("wake restarts breaks but not water\n");
+
+    // What the owner asked for, and what was not happening: a break interval that ran out while the
+    // machine was asleep must start over from the moment of waking, while the hydration reminder carries
+    // on from whatever was left of it. The two used to be the same counter, decremented by the same
+    // elapsed time, and the owner had to pick one behaviour for both.
+    NSString *domain = @"local.eyeleo.EyeLeoTestsWake";
+
+    EBCore *core = [[EBCore alloc] init];
+    core.preferencesDomain = domain;
+    Recorder *rec = [[Recorder alloc] init];
+    core.delegate = rec;
+    rec.nFullscreenDisplay = -1;
+    EBTestSetIdleSeconds(0.0);
+
+    EBSettings s = core.defaultSettings;
+    s.bigPauseInterval = 50;
+    s.miniPauseInterval = 9;
+    s.warningEnabled = NO;
+    s.inactivityTracking = NO;
+    // Water on a short interval so the reminder arrives inside a test's worth of ticks.
+    s.waterReminderEnabled = YES;
+    s.waterIntervalMin = 10;
+    core.settings = s;
+    [core startWithFirstLaunch:NO lastShutdown:0];
+
+    // Wind both intervals down, leaving the reminder with less than a full interval in hand.
+    for (int i = 0; i < 2 * 60; i++)
+        [core tickWithElapsedMs:1000];
+    CheckEq(rec.nPresentWater, 0, @"no reminder yet");
+    long bigLeft = core.timeLeftToBigPause;
+    long miniLeft = core.timeLeftToMiniPause;
+    Check(bigLeft < s.bigPauseInterval * 60 * 1000, @"the long break has counted down");
+    Check(miniLeft < s.miniPauseInterval * 60 * 1000, @"the short break has counted down");
+
+    // The wake. resumeFromPause is what didWake calls once the elapsed-time origin is rebased.
+    [core resumeFromPause];
+    CheckEq((int)(core.timeLeftToBigPause / 60000), s.bigPauseInterval,
+            @"the long break starts again from the full interval");
+    CheckEq((int)(core.timeLeftToMiniPause / 60000), s.miniPauseInterval,
+            @"the short break starts again from the full interval");
+    Check([core nextState] == EBStateIdle, @"and the machine is back in the ordinary state");
+
+    // The reminder is not one of them. It must fire when its own remaining time is up, measured from
+    // where it stood before the sleep rather than from a fresh interval and rather than immediately.
+    int remainingSeconds = s.waterIntervalMin * 60 - 2 * 60;
+    for (int i = 0; i < remainingSeconds - 30; i++)
+        [core tickWithElapsedMs:1000];
+    CheckEq(rec.nPresentWater, 0, @"the reminder is still counting its own remaining time");
+    for (int i = 0; i < 60; i++)
+        [core tickWithElapsedMs:1000];
+    CheckEq(rec.nPresentWater, 1, @"and it arrives on its own schedule, not straight after the wake");
+}
+
 static void TestWarningInterval(void) {
     printf("warning interval bounds\n");
     // The notice needs room to count down before the dialog opens, so its floor is the shortest
@@ -1419,6 +1474,7 @@ int main(void) {
         TestTeaConfigAndSession();
         TestTeaConfigParsing();
         TestTeaConfigSeeding();
+        TestWakeRestartsBreaksNotWater();
         TestTeaNames();
         TestDrinkVessels();
         TestAnimationCadence();

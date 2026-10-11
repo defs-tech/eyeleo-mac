@@ -35,6 +35,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic) BOOL strictMode;
 // Only then may a short break be dismissed with a right click.
 @property(nonatomic) BOOL canCloseNotifications;
+// Whether there is a foreground session to take the keyboard from. A break that arrives while the screen
+// is locked must not remember what is in front, because that is the login window: it is gone by the time
+// the break ends, and restoring focus to it left the activation policy switched over for good.
+@property(nonatomic) BOOL sessionActive;
 // Test hook: forces which exercise a short break shows. EBExerciseNone, the default, keeps the
 // original random pick. Without it, checking one exercise means waiting for it to come up in a draw of
 // nine, which is not something anyone does twice.

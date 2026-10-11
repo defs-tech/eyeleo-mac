@@ -330,7 +330,13 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
 // an LSUIElement app that never becomes active leaves keystrokes going to whatever was in front,
 // so the break would be decorative.
 - (void)presentCapturingWindows:(NSArray<EBOverlayWindow *> *)windows {
-    if (!self.suspendedApplication)
+    // Only remember what is worth handing focus back to, and only while there is a foreground session
+    // to hand it to. A break that lands on a locked screen finds the login window in front, and by the
+    // time it ends that login window is gone, so restoring focus to it did nothing except leave the
+    // activation policy below switched over. sessionIsActive is the honest test for this: it is what the
+    // screen being locked actually does, rather than a list of system bundle identifiers that would be
+    // incomplete the first time another one showed up.
+    if (!self.suspendedApplication && self.sessionActive)
         self.suspendedApplication = NSWorkspace.sharedWorkspace.frontmostApplication;
 
     // A background-only (LSUIElement) app is never granted key focus: the frontmost application
@@ -368,6 +374,18 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
 - (void)restoreSuspendedApplication {
     NSRunningApplication *previous = self.suspendedApplication;
     self.suspendedApplication = nil;
+
+    // Back to a background-only app before anything can return early, so the Dock icon disappears and
+    // the next break starts from the same state as this one did.
+    //
+    // Every early return below used to sit above this line, which meant the policy stayed Regular for
+    // the rest of the session whenever nothing was captured, when the frontmost app was this one, or
+    // when it had quit during the break. The last of those is what a locked screen does: a break arriving
+    // on the login window remembers it, the lock is lifted, the login window is gone by then, and the app
+    // was left as a normal application with a Dock icon and an app menu. Once that had happened once, the
+    // next break captured EyeLeo itself and the third early return made it permanent.
+    NSApp.activationPolicy = NSApplicationActivationPolicyAccessory;
+
     if (!previous)
         return; // nothing was captured, so there is nothing to give back
     if (EBTraceOn())
@@ -376,8 +394,6 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
         return;
     if (previous.isTerminated)
         return;
-    // Back to a background-only app before handing focus over, so the Dock icon disappears.
-    NSApp.activationPolicy = NSApplicationActivationPolicyAccessory;
     // Plain activation: NSApplicationActivateIgnoringOtherApps is deprecated since macOS 14 and
     // has no effect, so it would silently fail to hand focus back.
     [previous activateWithOptions:0];
