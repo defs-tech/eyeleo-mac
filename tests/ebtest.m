@@ -768,41 +768,36 @@ static void TestPersonageFramesAndExercises(void) {
 // would ask for is checked by name above.
 static void TestDrinkVessels(void) {
     printf("drink vessels\n");
-    // Seven vessels, one per drink. A missing file would leave the reminder with an empty gap where the
-    // glass goes, and the tea types would all look the same, so check the files the way the frames were
-    // checked: in the source tree, because the test binary is not the bundle.
-    Check(EBNumDrinks == 8, @"eight drinks");
+    // Seven vessels, one per built-in tea, plus the glass for the hydration reminder. A missing file
+    // would leave the reminder with an empty gap where the glass goes, and the teas would all look the
+    // same, so check the files the way the frames were checked: in the source tree, because the test
+    // binary is not the bundle and every lookup through mainBundle would miss.
     NSString *root = [@(__FILE__) stringByDeletingLastPathComponent];
     root = [root stringByDeletingLastPathComponent];
-    static NSString *const kDrinks[8] = { @"tea_green", @"tea_white", @"tea_oolong", @"tea_black",
+    static NSString *const kDrinks[] = { @"tea_green", @"tea_white", @"tea_oolong", @"tea_black",
                                           @"tea_red", @"tea_puer", @"tea_herbal", @"tea_water" };
-    for (int i = 0; i < EBNumDrinks; i++) {
+    for (size_t i = 0; i < sizeof(kDrinks) / sizeof(kDrinks[0]); i++) {
         NSString *path = [root stringByAppendingPathComponent:
                                        [@"Resources" stringByAppendingPathComponent:
                                           [kDrinks[i] stringByAppendingPathExtension:@"png"]]];
         Checkf([[NSFileManager defaultManager] fileExistsAtPath:path], @"%@ exists", kDrinks[i]);
         NSBitmapImageRep *r = RepFromPath(path);
         Checkf(r != nil, @"%@ decodes", kDrinks[i]);
-        if (r)
-            Checkf(r.hasAlpha, @"%@ carries an alpha channel", kDrinks[i]);
-    }
-    // Each vessel has to fit the 71x44 pt slot, or it would overlap the text column in the bubble. The
-    // stored bitmaps are twice that.
-    for (int i = 0; i < EBNumDrinks; i++) {
-        NSString *path = [root stringByAppendingPathComponent:
-                                       [@"Resources" stringByAppendingPathComponent:
-                                          [kDrinks[i] stringByAppendingPathExtension:@"png"]]];
-        NSBitmapImageRep *r = RepFromPath(path);
         if (!r)
             continue;
+        // The same standard drinkImageNamed: enforces at runtime, checked here against the files that
+        // ship: a real alpha channel, 8 bits a sample, and no larger than the slot.
+        Checkf(r.hasAlpha, @"%@ carries an alpha channel", kDrinks[i]);
+        Checkf(r.bitsPerSample == 8, @"%@ is 8 bits a sample (%ld)", kDrinks[i], (long)r.bitsPerSample);
+        // Each vessel has to fit the 71x44 pt slot, or it would overlap the text column in the bubble.
+        // The stored bitmaps are twice that.
         Checkf(r.pixelsWide <= 142 && r.pixelsHigh <= 88, @"%@ fits the 142x88 slot (%ldx%ld)", kDrinks[i],
                (long)r.pixelsWide, (long)r.pixelsHigh);
     }
-    // Out of range values have to come back nil rather than the wrong vessel: drinkImage: indexes its
-    // array with the raw value.
-    Check([EBAssets.shared drinkImage:EBDrinkNone] == nil, @"no glass for the empty kind");
-    Check([EBAssets.shared drinkImage:(EBDrinkKind)EBNumDrinks] == nil, @"no glass past the last kind");
-    Check([EBAssets.shared drinkImage:(EBDrinkKind)99] == nil, @"no glass for a nonsense kind");
+    // A name with nothing behind it has to come back nil rather than the wrong vessel, which is what
+    // happens once the lookup is by name instead of by index into a fixed array.
+    Check([EBAssets.shared drinkImageNamed:@""] == nil, @"no vessel for an empty name");
+    Check([EBAssets.shared drinkImageNamed:@"nosuchtea"] == nil, @"no vessel for a name that is not configured");
 }
 
 static void TestAnimationCadence(void) {
@@ -829,6 +824,139 @@ static void TestAnimationCadence(void) {
     Check(window.transform.m11 == 1.0f, @"window exercise holds still");
 }
 
+static void TestTeaConfigSeeding(void) {
+    printf("tea config seeding\n");
+    // The properties that matter, and that a test can check without a bundle: an existing file is never
+    // touched, and a directory that is not there yet gets made. The template copy itself cannot be
+    // checked here, because the test binary is not the app bundle and has no tea.conf to copy.
+    NSString *scratch = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                                                     [NSString stringWithFormat:@"eyeleo-seed-%@",
+                                                                                        NSUUID.UUID.UUIDString]];
+    NSFileManager *files = NSFileManager.defaultManager;
+    NSString *nested = [scratch stringByAppendingPathComponent:@"deep/EyeLeo/tea.conf"];
+
+    // Nothing there, and no template to copy: the call declines rather than inventing a file.
+    Check(!SeedTeaConfigTo(nested), @"no file is created without a template to copy");
+    Check(![files fileExistsAtPath:nested], @"and none appears at the destination");
+
+    // The one property that must hold whatever else happens: a file the user put there is theirs.
+    Check([files createDirectoryAtPath:nested.stringByDeletingLastPathComponent
+           withIntermediateDirectories:YES
+                            attributes:nil
+                                 error:NULL],
+          @"scratch directory created");
+    NSString *mine = @"jasmine, 85, 30, 45\ngreen, 80, 10\n";
+    Check([mine writeToFile:nested atomically:YES encoding:NSUTF8StringEncoding error:NULL],
+          @"a file of my own written there");
+
+    Check(!SeedTeaConfigTo(nested), @"an existing file is left alone");
+    NSString *after = [NSString stringWithContentsOfFile:nested encoding:NSUTF8StringEncoding error:NULL];
+    Check([after isEqualToString:mine], @"and its contents are untouched");
+
+    [files removeItemAtPath:scratch error:NULL];
+}
+
+static void TestTeaConfigParsing(void) {
+    printf("tea config parsing\n");
+
+    // A whole configuration, parsed from text. Order is the point: the menu is built in the order the
+    // file lists, so a reordered file has to come back reordered.
+    EBTeaConfig cfg = EBParseTeaConfig(@"# a comment\n"
+                                       "\n"
+                                       "white, 85, 20, 30, 40\n"
+                                       "green, 80, 10, 15\n");
+    CheckEq(cfg.count, 2, @"both teas taken");
+    Check(strcmp(cfg.schemes[0].name, "white") == 0, @"the first line is the first tea");
+    Check(strcmp(cfg.schemes[1].name, "green") == 0, @"the second line is the second tea");
+    CheckEq(cfg.schemes[0].count, 3, @"white has three steeps");
+    CheckEq(cfg.schemes[0].seconds[1], 30, @"white's second steep is 30 s");
+    CheckEq(cfg.schemes[1].temperatureC, 80, @"green is 80 C");
+    Check(EBTeaSchemeIndexOfName(&cfg, "white") == 0, @"white found by name");
+    Check(EBTeaSchemeIndexOfName(&cfg, "nosuchtea") == -1, @"an absent name is not found");
+    EBTeaConfigFree(&cfg);
+
+    // A name nobody shipped is just a tea. That is the whole feature: there is no list to add to.
+    EBTeaConfig added = EBParseTeaConfig(@"jasmine, 85, 30, 45, 60\n");
+    CheckEq(added.count, 1, @"an unknown name makes a tea");
+    Check(strcmp(added.schemes[0].name, "jasmine") == 0, @"kept under its own name");
+    CheckEq(added.schemes[0].count, 3, @"with the steeps it was given");
+    EBTeaConfigFree(&added);
+
+    // Digits and underscores are allowed after the first letter, so pu_er and oolong2 are usable names.
+    EBTeaConfig shaped = EBParseTeaConfig(@"pu_er, 99, 20\nolong2, 85, 20\n");
+    CheckEq(shaped.count, 2, @"letters, then digits and underscores, are a valid name");
+    EBTeaConfigFree(&shaped);
+
+    // Every one of these falls back to the built-ins rather than to an empty menu. Each line is refused
+    // whole: nothing half-read is kept, which is what a hand-edited file should do.
+    static NSString *const kRefused[] = {
+        @"Green, 80, 10\n",       // uppercase: on a case-insensitive volume it is the same file name
+        @"pu erh, 90, 10\n",      // a space in the name
+        @"2oolong, 90, 10\n",     // a digit first
+        @"_oolong, 90, 10\n",     // an underscore first
+        @"\u043f\u0443\u044d\u0440, 90, 10\n", // cyrillic
+        @", 80, 10\n",            // no name at all
+        @"green, 0, 10\n",        // no temperature
+        @"green, 101, 10\n",      // above boiling
+        @"green, hot, 10\n",      // not a number
+        @"green, 80x, 10\n",      // a number with something after it
+        @"green, 80, abc\n",      // not a time
+        @"green, 80, 0\n",        // a zero-length steep would freeze the countdown
+        @"green, 80, -5\n",       // negative
+        @"green, 80, 30x\n",      // a time with something after it
+        @"green, 80\n",           // no times at all
+        @"green, 80, 1,2,3,4,5,6,7,8,9\n", // nine steeps, one too many
+        @"# nothing here\n\n   \n",        // comments and blank lines alone
+    };
+    for (size_t i = 0; i < sizeof(kRefused) / sizeof(kRefused[0]); i++) {
+        EBTeaConfig bad = EBParseTeaConfig(kRefused[i]);
+        Checkf(bad.count == 7, @"refused, built-ins instead (%zu): %@", i,
+               [kRefused[i] stringByTrimmingCharactersInSet:NSCharacterSet.newlineCharacterSet]);
+        EBTeaConfigFree(&bad);
+    }
+
+    // A repeated name is not a second tea. The first definition stands and the repeat is refused, which
+    // is not the same thing as falling back: the file still holds one usable tea, so the menu does not
+    // change. Whether the repeat wins instead was a choice; the first one winning means a duplicated
+    // block from an old file cannot silently override a schedule by being pasted lower down.
+    EBTeaConfig dup = EBParseTeaConfig(@"green, 80, 10, 15\ngreen, 90, 20\n");
+    CheckEq(dup.count, 1, @"a repeated name is one tea, not two");
+    if (dup.count == 1) {
+        CheckEq(dup.schemes[0].count, 2, @"the first definition is the one that stands");
+        CheckEq(dup.schemes[0].temperatureC, 80, @"with the temperature it was written with");
+    }
+    EBTeaConfigFree(&dup);
+
+    // Eight steeps is the ceiling and is exactly allowed, not one short of it.
+    EBTeaConfig full = EBParseTeaConfig(@"puer, 99, 1,2,3,4,5,6,7,8\n");
+    CheckEq(full.count, 1, @"eight steeps is allowed");
+    CheckEq(full.schemes[0].count, 8, @"all eight kept");
+    EBTeaConfigFree(&full);
+
+    // A file that lists fewer teas than the app ships is taken as it is. Nothing is added back for the
+    // ones it left out: that was a deliberate choice, and quietly restoring them would undo it.
+    EBTeaConfig fewer = EBParseTeaConfig(@"green, 80, 10, 15\n");
+    CheckEq(fewer.count, 1, @"only the listed tea, not the whole built-in set");
+    Check(strcmp(fewer.schemes[0].name, "green") == 0, @"and it is the one that was listed");
+    EBTeaConfigFree(&fewer);
+
+    // A line added next to the ones that already work still changes the menu order.
+    EBTeaConfig order = EBParseTeaConfig(@"oolong, 85, 20\ngreen, 80, 10\npuer, 99, 20\n");
+    Check(strcmp(order.schemes[0].name, "oolong") == 0, @"first is first");
+    Check(strcmp(order.schemes[1].name, "green") == 0, @"second is second");
+    Check(strcmp(order.schemes[2].name, "puer") == 0, @"third is third");
+    EBTeaConfigFree(&order);
+
+    // The built-in schedules are the fallback, and they are the researched numbers.
+    EBTeaConfig fallback = EBParseTeaConfig(@"\n");
+    CheckEq(fallback.count, 7, @"an empty file gives the seven built-in teas");
+    int puer = EBTeaSchemeIndexOfName(&fallback, "puer");
+    Check(puer >= 0, @"pu-erh is among them");
+    if (puer >= 0)
+        CheckEq(fallback.schemes[puer].count, 8, @"pu-erh has eight steeps");
+    EBTeaConfigFree(&fallback);
+}
+
 static void TestTeaConfigAndSession(void) {
     printf("tea config and session\n");
     // With no tea.conf on disk the built-in schedule has to be returned rather than an empty set, since a
@@ -837,27 +965,36 @@ static void TestTeaConfigAndSession(void) {
     Check(cfg.count >= 7, @"defaults cover the seven teas");
 
     // The defaults are the researched ones, so check a couple of them rather than only that something
-    // parsed: the point of the table is that the numbers were looked up.
-    int green = (int)EBDrinkGreen - 1;
-    Check(cfg.schemes[green].count == 6, @"green tea has six steeps");
-    CheckEq(cfg.schemes[green].seconds[0], 10, @"first green steep is 10 s");
-    CheckEq(cfg.schemes[green].seconds[5], 35, @"last green steep is 35 s");
-    int puer = (int)EBDrinkPuer - 1;
-    Check(cfg.schemes[puer].count == 8, @"pu-erh has eight steeps");
-    CheckEq(cfg.schemes[puer].seconds[7], 90, @"last pu-erh steep is 90 s");
-    int herbal = (int)EBDrinkHerbal - 1;
-    CheckEq(cfg.schemes[herbal].seconds[0], 300, @"herbal first steep is 300 s");
-    int red = (int)EBDrinkRed - 1;
-    Check(cfg.schemes[red].count == 6, @"red tea has six steeps");
-    CheckEq(cfg.schemes[red].temperatureC, 95, @"red tea is 95 C");
-    CheckEq(cfg.schemes[red].seconds[0], 7, @"first red steep is 7 s");
-    CheckEq(cfg.schemes[red].seconds[5], 30, @"last red steep is 30 s");
+    // parsed: the point of the table is that the numbers were looked up. Teas are found by name now, so
+    // these hold whichever schedule a person has in their own tea.conf.
+    int green = EBTeaSchemeIndexOfName(&cfg, "green");
+    Check(green >= 0, @"green tea is in the config");
+    Check(green >= 0 && cfg.schemes[green].count == 6, @"green tea has six steeps");
+    if (green >= 0) {
+        CheckEq(cfg.schemes[green].seconds[0], 10, @"first green steep is 10 s");
+        CheckEq(cfg.schemes[green].seconds[5], 35, @"last green steep is 35 s");
+    }
+    int puer = EBTeaSchemeIndexOfName(&cfg, "puer");
+    Check(puer >= 0 && cfg.schemes[puer].count == 8, @"pu-erh has eight steeps");
+    if (puer >= 0)
+        CheckEq(cfg.schemes[puer].seconds[7], 90, @"last pu-erh steep is 90 s");
+    int herbal = EBTeaSchemeIndexOfName(&cfg, "herbal");
+    if (herbal >= 0)
+        CheckEq(cfg.schemes[herbal].seconds[0], 300, @"herbal first steep is 300 s");
+    int red = EBTeaSchemeIndexOfName(&cfg, "red");
+    Check(red >= 0 && cfg.schemes[red].count == 6, @"red tea has six steeps");
+    if (red >= 0) {
+        CheckEq(cfg.schemes[red].temperatureC, 95, @"red tea is 95 C");
+        CheckEq(cfg.schemes[red].seconds[0], 7, @"first red steep is 7 s");
+        CheckEq(cfg.schemes[red].seconds[5], 30, @"last red steep is 30 s");
+    }
 
-    // Water has no steeping schedule, so there is nothing to brew.
-    Check(cfg.schemes[(int)EBDrinkWater - 1].seconds == NULL, @"water has no schedule");
+    // Water is not a tea and never was one in this file: it has its own reminder and its own settings,
+    // and nothing in tea.conf can make it into the menu.
+    Check(EBTeaSchemeIndexOfName(&cfg, "water") == -1, @"water is not one of the teas");
 
     EBTeaSession s;
-    EBTeaSessionStart(&s, &cfg, EBDrinkGreen);
+    EBTeaSessionStart(&s, &cfg, green);
     Check(EBTeaSessionValid(&s), @"session started");
     CheckEq(s.steep, 0, @"starts on the first steep");
     CheckEq(s.msLeft, 10000, @"first steep is 10 s");
@@ -882,7 +1019,7 @@ static void TestTeaConfigAndSession(void) {
 
     // Pouring mid-steep is refused, so a running timer is never thrown away.
     EBTeaSession mid;
-    EBTeaSessionStart(&mid, &cfg, EBDrinkGreen);
+    EBTeaSessionStart(&mid, &cfg, green);
     Check(!EBTeaSessionPour(&mid, &cfg), @"cannot pour while a steep is running");
     CheckEq(mid.steep, 0, @"still on the first steep after a refused pour");
 
@@ -899,7 +1036,7 @@ static void TestTeaConfigAndSession(void) {
     // nothing to start.
     // Counted on a fresh session so the number of presses is unambiguous.
     EBTeaSession whole;
-    EBTeaSessionStart(&whole, &cfg, EBDrinkGreen);
+    EBTeaSessionStart(&whole, &cfg, green);
     int guard = 0;
     int pours = 0;
     while (!whole.finished && guard++ < 1000) {
@@ -923,7 +1060,7 @@ static void TestTeaConfigAndSession(void) {
 
     // The moment the last steep runs out is the moment the session closes, with no press at all.
     EBTeaSession tail;
-    EBTeaSessionStart(&tail, &cfg, EBDrinkGreen);
+    EBTeaSessionStart(&tail, &cfg, green);
     for (int i = 0; i < 5; i++) {
         while (!tail.awaiting && !tail.finished)
             EBTeaSessionAdvance(&tail, 1000);
@@ -945,7 +1082,7 @@ static void TestTeaConfigAndSession(void) {
 
     // The wording has to follow the state, so the number on screen never claims a step that has not begun.
     EBTeaSession fresh;
-    EBTeaSessionStart(&fresh, &cfg, EBDrinkGreen);
+    EBTeaSessionStart(&fresh, &cfg, green);
     NSString *first = EBTeaSessionCaption(&cfg, &fresh, NO);
     Check([first containsString:@"1"], @"caption numbers the first steep");
     EBTeaSessionAdvance(&fresh, 11000);
@@ -964,24 +1101,25 @@ static void TestTeaConfigAndSession(void) {
     NSString *ru = EBTeaSessionCaption(&cfg, &fresh, YES);
     Check(ru.length > 0, @"russian caption exists");
 
-    // Water cannot be brewed.
-    EBTeaSession water;
-    EBTeaSessionStart(&water, &cfg, EBDrinkWater);
-    Check(!EBTeaSessionValid(&water), @"water is not brewable");
+    // An index that is not a tea cannot be brewed. This is what the water reminder used to depend on
+    // being able to ask for, and it still holds: there is nothing to brew for a name that is not in the
+    // list, whether that is water or a tea the person has since deleted.
     EBTeaSession none;
-    EBTeaSessionStart(&none, &cfg, EBDrinkNone);
+    EBTeaSessionStart(&none, &cfg, -1);
     Check(!EBTeaSessionValid(&none), @"nothing is not brewable");
+    EBTeaSession past;
+    EBTeaSessionStart(&past, &cfg, cfg.count + 5);
+    Check(!EBTeaSessionValid(&past), @"an index past the end is not brewable");
 
     // The tooltip carries the whole schedule, since the item title is only the tea's name.
-    NSString *sum = EBTeaSchemeSummary(&cfg, EBDrinkGreen, NO);
+    NSString *sum = EBTeaSchemeSummary(&cfg, green, NO);
     Check([sum containsString:@"10"], @"summary lists the first steep");
     Check([sum containsString:@"35"], @"summary lists the last steep");
     Check([sum containsString:@"6"], @"summary states how many steeps");
-    NSString *sumRu = EBTeaSchemeSummary(&cfg, EBDrinkPuer, YES);
+    NSString *sumRu = EBTeaSchemeSummary(&cfg, puer, YES);
     Check([sumRu containsString:@"8"], @"russian summary states the steep count");
     Check([sumRu containsString:@"с"], @"russian summary marks the unit");
-    Check(EBTeaSchemeSummary(&cfg, EBDrinkWater, NO).length > 0,
-          @"water has a summary even without a schedule");
+    CheckEq((int)EBTeaSchemeSummary(&cfg, -1, NO).length, 0, @"no schedule for a tea that is not there");
 
     EBTeaConfigFree(&cfg);
 }
@@ -1212,6 +1350,8 @@ int main(void) {
         printf("EyeLeo macOS core tests\n\n");
         TestPersonageFramesAndExercises();
         TestTeaConfigAndSession();
+        TestTeaConfigParsing();
+        TestTeaConfigSeeding();
         TestDrinkVessels();
         TestAnimationCadence();
         TestWarningInterval();
