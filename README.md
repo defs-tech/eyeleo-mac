@@ -1,5 +1,7 @@
 # EyeLeo for macOS
 
+**Version 2.3.0.**
+
 **Русская версия этого документа: [READMEru.md](READMEru.md).**
 
 A native macOS port of the EyeLeo tray application (Windows/C++/wxWidgets): it counts down to a long

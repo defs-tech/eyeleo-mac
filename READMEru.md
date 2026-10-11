@@ -1,5 +1,7 @@
 # EyeLeo для macOS
 
+**Версия 2.3.0.**
+
 **English version of this document: [README.md](README.md).**
 
 Нативный порт трей-приложения EyeLeo (Windows / C++ / wxWidgets): отсчитывает время до длинного
