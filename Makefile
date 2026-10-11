@@ -29,6 +29,11 @@ HEADERS := $(wildcard src/*.h)
 RESOURCES := $(wildcard Resources/*.png) $(wildcard Resources/*.icns) $(wildcard Resources/Personages/*.png)
 LOCALES := $(wildcard en.lproj/*.strings) $(wildcard ru.lproj/*.strings)
 
+# The tea schedule template. Copied into the app on the first run, after which the user's own copy is
+# the one read. It is a template and not a runtime asset: nothing in the bundle loads it, it is only
+# ever copied out of.
+TEA_CONF := tea.conf
+
 CC := clang
 
 # What the release builds are made for, as opposed to what a local build makes. A local build keeps the
@@ -62,7 +67,7 @@ FRAMEWORKS := -framework AppKit -framework CoreGraphics -framework QuartzCore \
 
 all: $(APP_BUNDLE)
 
-$(APP_BUNDLE): $(SOURCES) $(HEADERS) Info.plist entitlements.plist $(RESOURCES) $(LOCALES)
+$(APP_BUNDLE): $(SOURCES) $(HEADERS) Info.plist entitlements.plist $(RESOURCES) $(LOCALES) $(TEA_CONF)
 	@rm -rf $(APP_BUNDLE)
 	@mkdir -p $(MACOS_DIR) $(RES_DIR)/Personages $(RES_DIR)/en.lproj $(RES_DIR)/ru.lproj
 	@cp Info.plist $(CONTENTS)/Info.plist
@@ -75,6 +80,8 @@ $(APP_BUNDLE): $(SOURCES) $(HEADERS) Info.plist entitlements.plist $(RESOURCES) 
 	@# a localization, a flat Localizable.strings beside it is ignored
 	@cp -R en.lproj $(RES_DIR)/
 	@cp -R ru.lproj $(RES_DIR)/
+	@# at the top of Resources rather than beside the executable, so a path built from the bundle works
+	@cp $(TEA_CONF) $(RES_DIR)/
 	@$(CC) $(CFLAGS) $(LDFLAGS) -o $(MACOS_DIR)/$(APP) $(SOURCES) $(FRAMEWORKS)
 	@codesign --force --sign - --entitlements entitlements.plist --timestamp=none $(APP_BUNDLE)
 	@echo "built $(APP_BUNDLE)"
