@@ -134,10 +134,10 @@ install: $(APP_BUNDLE)
 	@ditto "$(APP_BUNDLE)" "$(DESTDIR)/$(APP).app"
 	@codesign --verify --strict "$(DESTDIR)/$(APP).app"
 	@echo "installed $(DESTDIR)/$(APP).app"
-	@echo "Settings and tea.conf are in the sandbox container and were not touched."
+	@echo "Settings and tea.conf are in ~/.config/eyeleo-mac and were not touched."
 
-# Remove it again. The sandbox container is deliberately left alone: it holds the user's settings and
-# their tea schemes, and deleting the app is not a request to delete those.
+# Remove it again. ~/.config/eyeleo-mac is deliberately left alone: it holds the user's settings and their
+# tea schemes, and deleting the app is not a request to delete those.
 uninstall:
 	@rm -rf "$(DESTDIR)/$(APP).app"
 	@echo "removed $(DESTDIR)/$(APP).app"
