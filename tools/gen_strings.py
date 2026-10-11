@@ -250,16 +250,6 @@ EXTRA = {
         # The tea submenu. The steeps themselves are timed from tea.conf, not from strings.
         "tb_menu_pour": "Пролив",
         "tb_menu_new_tea": "Новый чай",
-        # По одному ключу на встроенный чай, имя ключа — имя чая из tea.conf. У чая, добавленного в файл,
-        # такого ключа нет, и он показывается под своим именем, пока ему не заведут ключ.
-        "tea_name_black": "Чёрный чай",
-        "tea_name_green": "Зелёный чай",
-        "tea_name_herbal": "Травяной чай",
-        "tea_name_milky_oolong": "Молочный улун",
-        "tea_name_oolong": "Улун",
-        "tea_name_puer": "Пуэр",
-        "tea_name_red": "Красный чай",
-        "tea_name_white": "Белый чай",
         "settings_start_at_login": "Запускать при входе",
         "settings_start_at_login_tooltip": "Разрешить macOS запускать EyeLeo при входе в систему",
         "information_stats": "Статистика",
