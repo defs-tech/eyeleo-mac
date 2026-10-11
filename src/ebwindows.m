@@ -1041,7 +1041,7 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
     // The vessel is a picture rather than the drawn glass this replaced. Each drink has its own glass,
     // so a tea reminder and the water reminder are distinguishable at a glance, and both are lit the
     // same way. If the bitmap is missing the space is left empty rather than showing a broken image.
-    NSImage *glass = [EBAssets.shared drinkImage:EBDrinkWater];
+    NSImage *glass = [EBAssets.shared drinkImageNamed:@"water"];
     if (glass) {
         NSImageView *art = [[NSImageView alloc] initWithFrame:NSMakeRect(artX, artY, artW, 44)];
         art.image = glass;

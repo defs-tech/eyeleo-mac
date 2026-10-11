@@ -43,21 +43,14 @@ typedef NS_ENUM(int, EBPersonageFrame) {
 // enum value, and that array is sized by this constant, so the enum and the array cannot drift apart.
 enum { EBNumPersonageFrames = 17 };
 
-// What is being drunk. Each has its own glass, so the reminder shows the cup and not a generic icon.
-typedef NS_ENUM(int, EBDrinkKind) {
-    EBDrinkNone = 0,
-    EBDrinkGreen,   // green tea
-    EBDrinkWhite,   // white tea
-    EBDrinkOolong,
-    EBDrinkBlack,
-    EBDrinkRed,
-    EBDrinkPuer,
-    EBDrinkHerbal,
-    EBDrinkWater,   // the hydration reminder, not tea
-};
+// What a drink's vessel has to be. The slot is the corner of the countdown bubble: 71x44 pt, so 142x88 px
+// of artwork on a Retina display. Anything bigger does not fit and anything smaller is allowed, since the
+// seven vessels that ship are all narrower or shorter than the slot rather than filling it.
+enum { EBDrinkSlotWidthPt = 71, EBDrinkSlotHeightPt = 44 };
 
-// How many kinds exist, counting the water. drinkImage: indexes its array with the raw value.
-enum { EBNumDrinks = 8 };
+// PNG colour types, from the spec. Only the one with a real alpha channel is accepted: a vessel without
+// one shows as a black box, which is worse than showing nothing.
+enum { EBPngColourTypeRGBA = 6, EBPngBitDepth = 8 };
 
 @interface EBAssets : NSObject
 
@@ -71,16 +64,22 @@ enum { EBNumDrinks = 8 };
 - (nullable NSImage *)noticeLeopard; // notification_leopard.png
 - (nullable NSImage *)personage:(EBPersonageFrame)frame;
 
-// The glass for a drink, at 71x44 pt. Seven separate vessels rather than one tinted, because the shapes
-// are the point: a tall faceted water glass and a wide shallow one tell you apart at a glance.
-- (nullable NSImage *)drinkImage:(EBDrinkKind)drink;
+// The vessel for a drink, at 71x44 pt. Separate vessels rather than one tinted, because the shapes are the
+// point: a tall faceted water glass and a wide shallow one tell you apart at a glance.
+//
+// Named rather than indexed, so a tea added to tea.conf gets a vessel without a rebuild: the name from
+// tea.conf is the stem of tea_<name>.png. Water is a drink that has a vessel but is not a tea, and comes
+// through here the same way under the name "water".
+//
+// Returns nil when the file is missing or does not meet the standard above, and says which in the log.
+- (nullable NSImage *)drinkImageNamed:(NSString *)name;
 
 // Drops the personage frames. Called when a break ends; the common case holds none at all,
 // because short breaks are the only consumer.
 - (void)purgePersonage;
 
-// Drops the glass bitmaps. Called when the reminder closes; seven vessels are small but there is no
-// reason to hold them between drinks either.
+// Drops the vessels. Called when the reminder closes; they are small but there is no reason to hold them
+// between drinks either.
 - (void)purgeDrinks;
 
 @end

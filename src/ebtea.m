@@ -1,69 +1,97 @@
 #import "ebtea.h"
 
-#import "ebtext.h"
+#import "ebcore.h"
 
-// The default schedule, used when tea.conf is absent or unreadable. The short ones are gongfu lengths,
-// where each steep runs longer than the last because the leaves have already opened; the herbal one is in
-// the same units and is simply much longer.
+// The schedules the app falls back on when tea.conf lists no teas, and the ones shipped in the template
+// file. The short ones are gongfu lengths, where each steep runs longer than the last because the leaves
+// have already opened; the herbal one is in the same units and is simply much longer.
 static const struct {
-    EBDrinkKind kind;
+    const char *name;
     double temperature;
-    int seconds[8];
+    int seconds[EBMaxSteeps];
     int count;
-} kDefaults[] = {
-    { EBDrinkGreen, 80.0, { 10, 15, 20, 25, 30, 35, 0, 0 }, 6 },
-    { EBDrinkWhite, 85.0, { 10, 15, 20, 25, 30, 0, 0, 0 }, 5 },
-    { EBDrinkOolong, 85.0, { 15, 25, 35, 45, 60, 75, 0, 0 }, 6 },
-    { EBDrinkBlack, 90.0, { 20, 30, 40, 50, 60, 70, 0, 0 }, 6 },
-    { EBDrinkRed, 95.0, { 7, 10, 15, 20, 25, 30, 0, 0 }, 6 },
-    { EBDrinkPuer, 99.0, { 20, 30, 40, 50, 60, 70, 80, 90 }, 8 },
-    { EBDrinkHerbal, 100.0, { 300, 360, 420, 480, 0, 0, 0, 0 }, 4 },
+} kBuiltInTeas[] = {
+    { "green", 80.0, { 10, 15, 20, 25, 30, 35, 0, 0 }, 6 },
+    { "white", 85.0, { 10, 15, 20, 25, 30, 0, 0, 0 }, 5 },
+    { "oolong", 85.0, { 15, 25, 35, 45, 60, 75, 0, 0 }, 6 },
+    { "black", 90.0, { 20, 30, 40, 50, 60, 70, 0, 0 }, 6 },
+    { "red", 95.0, { 7, 10, 15, 20, 25, 30, 0, 0 }, 6 },
+    { "puer", 99.0, { 20, 30, 40, 50, 60, 70, 80, 90 }, 8 },
+    { "herbal", 100.0, { 300, 360, 420, 480, 0, 0, 0, 0 }, 4 },
 };
+enum { kNumBuiltInTeas = (int)(sizeof(kBuiltInTeas) / sizeof(kBuiltInTeas[0])) };
 
-static int SchemeIndex(EBDrinkKind kind) {
-    // Config schemes are indexed by EBDrinkKind, which has EBDrinkNone at 0, so the slot is kind - 1.
-    return (kind > EBDrinkNone && kind <= EBDrinkWater) ? (int)kind - 1 : -1;
-}
+// Longest single steep accepted. Herbal is the longest that ships, at 300, so an hour is well clear of any
+// real schedule and only catches a typo like an extra zero.
+enum { kMaxSteepSeconds = 3600 };
 
-static void FillDefaults(EBTeaConfig *cfg) {
-    memset(cfg, 0, sizeof(*cfg));
-    for (size_t i = 0; i < sizeof(kDefaults) / sizeof(kDefaults[0]); i++) {
-        int slot = SchemeIndex(kDefaults[i].kind);
-        if (slot < 0 || slot >= EBNumDrinks)
-            continue;
-        EBTeaScheme *sc = &cfg->schemes[slot];
-        sc->kind = kDefaults[i].kind;
-        sc->temperatureC = kDefaults[i].temperature;
-        sc->count = kDefaults[i].count;
-        sc->seconds = calloc((size_t)MAX(kDefaults[i].count, 1), sizeof(int));
-        for (int j = 0; j < kDefaults[i].count; j++)
-            sc->seconds[j] = kDefaults[i].seconds[j];
-        cfg->count++;
+// The name is the whole identity of a tea: it keys its picture file and its menu entry, so it is held to a
+// shape that cannot go wrong on either. Lowercase Latin, one word, no spaces, starting with a letter.
+//
+// Uppercase is refused rather than folded. A macOS volume is case-insensitive by default, so Tea.png and
+// tea.png would be one file, and a name that differs only in case would quietly pick up another's picture.
+static BOOL NameIsValid(NSString *name) {
+    if (name.length == 0 || name.length > 24)
+        return NO;
+    for (NSUInteger i = 0; i < name.length; i++) {
+        unichar c = [name characterAtIndex:i];
+        BOOL letter = (c >= 'a' && c <= 'z');
+        BOOL digit = (c >= '0' && c <= '9');
+        // Digits and underscores may follow the first letter but not start the name.
+        if (!letter && !(i > 0 && (digit || c == '_')))
+            return NO;
     }
+    return YES;
 }
 
-// Maps a name from the config onto a kind. The file is written by hand, so a few spellings are accepted
-// for each tea: nobody remembers whether they typed puer, pu-er or puerh.
-static EBDrinkKind KindForName(NSString *name) {
-    NSString *n = [name stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]
-                      .lowercaseString;
-    if ([n isEqualToString:@"green"] || [n isEqualToString:@"зеленый"] || [n isEqualToString:@"зелёный"])
-        return EBDrinkGreen;
-    if ([n isEqualToString:@"white"] || [n isEqualToString:@"белый"])
-        return EBDrinkWhite;
-    if ([n isEqualToString:@"oolong"] || [n isEqualToString:@"oolon"] || [n isEqualToString:@"Ulun"] ||
-        [n isEqualToString:@"улун"])
-        return EBDrinkOolong;
-    if ([n isEqualToString:@"black"] || [n isEqualToString:@"чёрный"] || [n isEqualToString:@"черный"])
-        return EBDrinkBlack;
-    if ([n isEqualToString:@"red"] || [n isEqualToString:@"красный"] || [n isEqualToString:@"красн"])
-        return EBDrinkRed;
-    if ([n isEqualToString:@"puer"] || [n isEqualToString:@"pu-er"] || [n isEqualToString:@"puerh"] ||
-        [n isEqualToString:@"пуэр"])
-        return EBDrinkPuer;
-    if ([n isEqualToString:@"herbal"] || [n isEqualToString:@"травяной"] || [n isEqualToString:@"grass"])
-        return EBDrinkHerbal;
-    return EBDrinkNone;
+// intValue answers 0 for text that is not a number at all, which would turn a typo into a silently dropped
+// steep. A scanner with nothing left over is what separates "30" from "30x".
+static BOOL ParseSteepSeconds(NSString *text, int *out) {
+    NSScanner *scanner = [NSScanner scannerWithString:text];
+    int v = 0;
+    if (![scanner scanInt:&v] || !scanner.isAtEnd || v <= 0 || v > kMaxSteepSeconds)
+        return NO;
+    *out = v;
+    return YES;
+}
+
+static BOOL ParseTemperature(NSString *text, double *out) {
+    NSScanner *scanner = [NSScanner scannerWithString:text];
+    double v = 0;
+    if (![scanner scanDouble:&v] || !scanner.isAtEnd || v <= 0 || v > 100)
+        return NO;
+    *out = v;
+    return YES;
+}
+
+// A refusal is only visible to whoever turned tracing on, which is the point: a rejected line is a
+// mistake in a file nobody is supposed to be editing by hand, and the day it matters is the day somebody
+// is. It is not an error dialog over the top of an app that is otherwise working.
+static void Reject(NSUInteger lineNo, NSString *reason) {
+    if (EBTraceOn())
+        fprintf(stderr, "[EB] tea.conf line %lu rejected: %s\n", (unsigned long)lineNo + 1, reason.UTF8String);
+}
+
+static void Report(NSString *message) {
+    if (EBTraceOn())
+        fprintf(stderr, "[EB] tea.conf: %s\n", message.UTF8String);
+}
+
+static EBTeaConfig MakeBuiltInConfig(void) {
+    EBTeaConfig cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.schemes = calloc((size_t)kNumBuiltInTeas, sizeof(EBTeaScheme));
+    cfg.count = kNumBuiltInTeas;
+    for (int i = 0; i < cfg.count; i++) {
+        EBTeaScheme *scheme = &cfg.schemes[i];
+        scheme->name = strdup(kBuiltInTeas[i].name);
+        scheme->temperatureC = kBuiltInTeas[i].temperature;
+        scheme->count = kBuiltInTeas[i].count;
+        scheme->seconds = calloc((size_t)(kBuiltInTeas[i].count), sizeof(int));
+        for (int j = 0; j < scheme->count; j++)
+            scheme->seconds[j] = kBuiltInTeas[i].seconds[j];
+    }
+    return cfg;
 }
 
 NSString *EBTeaConfigPath(void) {
@@ -72,86 +100,196 @@ NSString *EBTeaConfigPath(void) {
     return [support stringByAppendingPathComponent:@"EyeLeo/tea.conf"];
 }
 
-EBTeaConfig EBLoadTeaConfig(void) {
-    EBTeaConfig cfg;
-    FillDefaults(&cfg);
+// Puts the template from the bundle where the user can find and edit it.
+//
+// Without this the file exists only as something the user has to create blind, and the Windows build
+// has had it seeded from the installer's copy for several versions. Two copies of the same thing is the
+// arrangement the other build already uses and the reason it is worth matching here: one file to edit,
+// in a place an ordinary person can reach, instead of one to guess at.
+//
+// Never overwrites: an existing file is the user's, and this runs before anything has been read, so it
+// only ever happens once per install.
+//
+// The sandbox is no obstacle to this and entitlements.plist stays as it is: an app may always read its
+// own bundle and write anywhere inside its own container, and both paths are one of those two. The
+// container itself only comes into being once the app has written something, so the directory is made
+// here rather than assumed.
+BOOL SeedTeaConfigTo(NSString *path) {
+    NSFileManager *files = NSFileManager.defaultManager;
+    if ([files fileExistsAtPath:path])
+        return NO;
 
-    NSString *path = EBTeaConfigPath();
-    NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];
+    NSString *template = [NSBundle.mainBundle pathForResource:@"tea" ofType:@"conf"];
+    if (!template) {
+        Report(@"no tea.conf template in the bundle, leaving the file to be created by hand");
+        return NO;
+    }
+
+    NSError *error = nil;
+    if (![files createDirectoryAtPath:path.stringByDeletingLastPathComponent
+           withIntermediateDirectories:YES
+                            attributes:nil
+                                 error:&error]) {
+        Report([NSString stringWithFormat:@"the folder for tea.conf could not be created: %@",
+                                      error.localizedDescription]);
+        return NO;
+    }
+    if (![files copyItemAtPath:template toPath:path error:&error]) {
+        Report([NSString stringWithFormat:@"tea.conf could not be created: %@", error.localizedDescription]);
+        return NO;
+    }
+
+    Report(@"tea.conf created from the template in the app bundle");
+    return YES;
+}
+
+BOOL SeedTeaConfig(void) { return SeedTeaConfigTo(EBTeaConfigPath()); }
+
+EBTeaConfig EBLoadTeaConfig(void) {
+    SeedTeaConfig();
+
+    NSString *text = [NSString stringWithContentsOfFile:EBTeaConfigPath()
+                                               encoding:NSUTF8StringEncoding
+                                                  error:NULL];
     if (!text)
-        return cfg; // no file yet: the defaults are the answer, not a failure
+        return MakeBuiltInConfig(); // nothing readable there: the built-in schedules are the answer
+    return EBParseTeaConfig(text);
+}
+
+EBTeaConfig EBParseTeaConfig(NSString *text) {
 
     // Lines look like:  name, temperature, seconds...  with # for a comment and blank lines ignored.
-    for (NSString *raw in [text componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]]) {
-        NSString *line = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    NSArray<NSString *> *lines = [text componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+    NSMutableArray<NSMutableDictionary *> *parsed = [NSMutableArray array];
+    NSMutableSet<NSString *> *seen = [NSMutableSet set];
+
+    for (NSUInteger lineNo = 0; lineNo < lines.count; lineNo++) {
+        NSString *line = [lines[lineNo] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
         if (line.length == 0 || [line hasPrefix:@"#"])
             continue;
+
         NSArray<NSString *> *parts = [line componentsSeparatedByString:@","];
-        if (parts.count < 3)
+        NSString *name = [parts[0] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        if (!NameIsValid(name)) {
+            Reject(lineNo, [NSString stringWithFormat:@"\"%@\" is not a usable name: one lowercase Latin "
+                                                      @"word, letters, then digits or underscores",
+                                                      name]);
             continue;
-        EBDrinkKind kind = KindForName(parts[0]);
-        int slot = SchemeIndex(kind);
-        if (slot < 0)
-            continue; // an unknown name, or water, which has no steeping schedule
-
-        NSMutableArray<NSNumber *> *secs = [NSMutableArray array];
-        for (NSUInteger i = 2; i < parts.count; i++) {
-            NSString *p = [parts[i] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-            int v = p.intValue;
-            // A zero or negative time would make the countdown never move, so drop it rather than take it.
-            if (v > 0)
-                [secs addObject:@(v)];
         }
-        if (secs.count == 0)
-            continue; // a line with no usable times keeps the built-in schedule for that tea
-
-        double temp = parts[1].doubleValue;
-        EBTeaScheme *sc = &cfg.schemes[slot];
-        if (sc->seconds) {
-            // The tea is already in the list from the defaults; overwrite rather than add a second copy.
-            free(sc->seconds);
-        } else {
-            cfg.count++;
+        if ([seen containsObject:name]) {
+            Reject(lineNo, [NSString stringWithFormat:@"%@ is already defined above", name]);
+            continue;
         }
-        sc->kind = kind;
-        sc->temperatureC = temp > 0 ? temp : sc->temperatureC;
-        sc->count = (int)secs.count;
-        sc->seconds = calloc(secs.count, sizeof(int));
-        for (NSUInteger i = 0; i < secs.count; i++)
-            sc->seconds[i] = secs[i].intValue;
+        if (parts.count < 3) {
+            Reject(lineNo, [NSString stringWithFormat:@"%@ has too few fields, expected name, temperature, "
+                                                  @"then one time per steep",
+                                                  name]);
+            continue;
+        }
+
+        double temperature = 0;
+        if (!ParseTemperature(parts[1], &temperature)) {
+            Reject(lineNo, [NSString stringWithFormat:@"%@: temperature must be a number over 0 and up to 100",
+                                                  name]);
+            continue;
+        }
+
+        NSMutableArray<NSNumber *> *seconds = [NSMutableArray array];
+        BOOL malformed = NO;
+        for (NSUInteger i = 2; i < parts.count && !malformed; i++) {
+            int v = 0;
+            NSString *field = [parts[i] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+            if (!ParseSteepSeconds(field, &v)) {
+                Reject(lineNo, [NSString stringWithFormat:@"%@: \"%@\" is not a steep time in whole seconds",
+                                                  name, field]);
+                malformed = YES;
+            } else if ((int)seconds.count >= EBMaxSteeps) {
+                Reject(lineNo, [NSString stringWithFormat:@"%@: more than %d steeps", name, EBMaxSteeps]);
+                malformed = YES;
+            } else {
+                [seconds addObject:@(v)];
+            }
+        }
+        if (malformed || seconds.count == 0)
+            continue;
+
+        [seen addObject:name];
+        [parsed addObject:[@{ @"name": name, @"temp": @(temperature), @"seconds": seconds } mutableCopy]];
     }
+
+    // A file that lists no teas is read as no file at all. Otherwise a single bad line would leave the
+    // list empty and the menu bare, which reads as breakage rather than as what it is: a file with a
+    // mistake in it, reported under EYELEO_DEBUG and left alone.
+    if (parsed.count == 0) {
+        Report(@"no usable teas in tea.conf, using the built-in schedules");
+        return MakeBuiltInConfig();
+    }
+
+    EBTeaConfig cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.count = (int)parsed.count;
+    cfg.schemes = calloc((size_t)cfg.count, sizeof(EBTeaScheme));
+    for (int i = 0; i < cfg.count; i++) {
+        NSDictionary *entry = parsed[i];
+        NSString *name = entry[@"name"];
+        NSArray<NSNumber *> *seconds = entry[@"seconds"];
+        EBTeaScheme *scheme = &cfg.schemes[i];
+        scheme->name = strdup(name.UTF8String);
+        scheme->temperatureC = [entry[@"temp"] doubleValue];
+        scheme->count = (int)seconds.count;
+        scheme->seconds = calloc((size_t)scheme->count, sizeof(int));
+        for (int j = 0; j < scheme->count; j++)
+            scheme->seconds[j] = seconds[j].intValue;
+    }
+
+    Report([NSString stringWithFormat:@"%d teas from tea.conf: %@", cfg.count,
+                                      [[parsed valueForKey:@"name"] componentsJoinedByString:@", "]]);
     return cfg;
 }
 
 void EBTeaConfigFree(EBTeaConfig *config) {
-    for (int i = 0; i < EBNumDrinks; i++) {
+    for (int i = 0; i < config->count; i++) {
+        free(config->schemes[i].name);
         free(config->schemes[i].seconds);
-        config->schemes[i].seconds = NULL;
     }
+    free(config->schemes);
     memset(config, 0, sizeof(*config));
 }
 
+int EBTeaSchemeIndexOfName(const EBTeaConfig *config, const char *name) {
+    if (!name || !*name)
+        return -1;
+    for (int i = 0; i < config->count; i++) {
+        if (strcmp(config->schemes[i].name, name) == 0)
+            return i;
+    }
+    return -1;
+}
+
+const EBTeaScheme *EBTeaSessionTea(const EBTeaConfig *config, const EBTeaSession *s) {
+    if (!config || !s || s->tea < 0 || s->tea >= config->count)
+        return NULL;
+    return &config->schemes[s->tea];
+}
+
 int EBTeaSessionSteepSeconds(const EBTeaConfig *config, const EBTeaSession *s) {
-    int slot = SchemeIndex(s->kind);
-    if (slot < 0 || s->steep < 0 || s->steep >= s->count)
-        return 0;
-    const EBTeaScheme *sc = &config->schemes[slot];
-    if (s->steep >= sc->count)
+    const EBTeaScheme *sc = EBTeaSessionTea(config, s);
+    if (!sc || s->steep < 0 || s->steep >= s->count || s->steep >= sc->count)
         return 0;
     return sc->seconds[s->steep];
 }
 
-BOOL EBTeaSessionValid(const EBTeaSession *s) { return s->kind != EBDrinkNone && s->count > 0; }
+BOOL EBTeaSessionValid(const EBTeaSession *s) { return s->tea >= 0 && s->count > 0; }
 
-void EBTeaSessionStart(EBTeaSession *out, const EBTeaConfig *config, EBDrinkKind kind) {
+void EBTeaSessionStart(EBTeaSession *out, const EBTeaConfig *config, int tea) {
     memset(out, 0, sizeof(*out));
-    int slot = SchemeIndex(kind);
-    if (slot < 0)
+    out->tea = -1;
+    if (tea < 0 || tea >= config->count)
         return;
-    const EBTeaScheme *sc = &config->schemes[slot];
-    if (sc->count <= 0)
+    const EBTeaScheme *sc = &config->schemes[tea];
+    if (sc->count <= 0 || !sc->seconds)
         return;
-    out->kind = kind;
+    out->tea = tea;
     out->steep = 0;
     out->count = sc->count;
     out->msLeft = (long)sc->seconds[0] * 1000;
@@ -159,7 +297,10 @@ void EBTeaSessionStart(EBTeaSession *out, const EBTeaConfig *config, EBDrinkKind
     out->finished = NO;
 }
 
-void EBTeaSessionStop(EBTeaSession *s) { memset(s, 0, sizeof(*s)); }
+void EBTeaSessionStop(EBTeaSession *s) {
+    memset(s, 0, sizeof(*s));
+    s->tea = -1;
+}
 
 // Counts one steep down. When it runs out the session parks in "awaiting" rather than starting the next
 // one: the leaf steeps in the pot until someone decides to pour again, and that pause is the whole point
@@ -212,29 +353,32 @@ int EBTeaSessionNextSeconds(const EBTeaConfig *config, const EBTeaSession *s) {
     return EBTeaSessionSteepSeconds(config, &next);
 }
 
-NSString *EBTeaName(EBDrinkKind kind, BOOL russian) {
-    switch (kind) {
-    case EBDrinkGreen: return russian ? @"Зелёный чай" : @"Green tea";
-    case EBDrinkWhite: return russian ? @"Белый чай" : @"White tea";
-    case EBDrinkOolong: return russian ? @"Улун" : @"Oolong";
-    case EBDrinkBlack: return russian ? @"Чёрный чай" : @"Black tea";
-    case EBDrinkRed: return russian ? @"Красный чай" : @"Red tea";
-    case EBDrinkPuer: return russian ? @"Пуэр" : @"Pu-erh";
-    case EBDrinkHerbal: return russian ? @"Травяной чай" : @"Herbal tea";
-    case EBDrinkWater: return russian ? @"Вода" : @"Water";
-    default: return russian ? @"Чай" : @"Tea";
-    }
+NSString *EBTeaDisplayName(const char *name) {
+    if (!name || !*name)
+        return @"";
+
+    // A key with no entry comes back as the key rather than as nil, so a missing translation has to be
+    // recognised by comparing against the key that was asked for. Let it through and the menu shows
+    // "tea_name_jasmine" where a tea is supposed to be, which is the one thing a fallback must not do.
+    NSString *key = [NSString stringWithFormat:@"tea_name_%s", name];
+    NSString *translated = [NSBundle.mainBundle localizedStringForKey:key value:nil table:nil];
+    if (translated.length > 0 && ![translated isEqualToString:key])
+        return translated;
+
+    // The name from tea.conf is the fallback rather than an empty line, so a tea added to the file is
+    // legible before anyone has written anything for it.
+    return @(name);
 }
 
 NSString *EBTeaSessionCaption(const EBTeaConfig *config, const EBTeaSession *s, BOOL russian) {
     if (!EBTeaSessionValid(s))
         return @"";
-    int slot = SchemeIndex(s->kind);
-    double temp = slot >= 0 ? config->schemes[slot].temperatureC : 0;
+    const EBTeaScheme *sc = EBTeaSessionTea(config, s);
+    double temp = sc ? sc->temperatureC : 0;
 
     // The wording is assembled here rather than as a format string in the .strings file: the step count is
     // a number that has to sit inside a sentence in two languages, and Russian puts it in a different place.
-    NSString *name = EBTeaName(s->kind, russian);
+    NSString *name = EBTeaDisplayName(sc ? sc->name : "");
 
     if (s->finished) {
         return russian ? [NSString stringWithFormat:@"%@ готов", name]
@@ -257,11 +401,10 @@ NSString *EBTeaSessionCaption(const EBTeaConfig *config, const EBTeaSession *s, 
                    : [NSString stringWithFormat:@"Steep %d of %d, %.0f°C", s->steep + 1, s->count, temp];
 }
 
-NSString *EBTeaSchemeSummary(const EBTeaConfig *config, EBDrinkKind kind, BOOL russian) {
-    int slot = SchemeIndex(kind);
-    if (slot < 0)
+NSString *EBTeaSchemeSummary(const EBTeaConfig *config, int tea, BOOL russian) {
+    if (tea < 0 || tea >= config->count)
         return @"";
-    const EBTeaScheme *sc = &config->schemes[slot];
+    const EBTeaScheme *sc = &config->schemes[tea];
     if (sc->count <= 0 || !sc->seconds)
         return russian ? @"схема не задана" : @"no schedule";
     NSMutableString *list = [NSMutableString string];

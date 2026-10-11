@@ -69,7 +69,7 @@ static const long EBTeaEventDeferCapSec = 150;
     //   EYELEO_TEST_INTERVAL_MIN  clamp both break intervals to N minutes
     //   EYELEO_TEST_WATER_SEC     first hydration reminder after N seconds instead of the interval
     //   EYELEO_TEST_TEA_SEC       start brewing after N seconds, 1..600
-    //   EYELEO_TEST_TEA_KIND      which tea, same values as EBDrinkKind; default green
+    //   EYELEO_TEST_TEA_NAME      which tea, by the name from tea.conf; default green
     NSDictionary *env = NSProcessInfo.processInfo.environment;
 
     if ([env[@"EYELEO_FAST_MODE"] isEqualToString:@"1"]) {
@@ -79,6 +79,15 @@ static const long EBTeaEventDeferCapSec = 150;
 
     EBTraceLap("settings load");
     BOOL loaded = [_core loadSettings];
+
+    // Read at startup rather than when the menu is first opened, which is what this used to do and why
+    // it had to stay lazy. Now that tea.conf is created from the bundle on the first run, there is
+    // something to do at launch: the file has to exist before anyone can go looking for it. The cost is
+    // one file read per launch, and in exchange the menu is right from the first click and a broken line
+    // is reported while there is still a log to read it in.
+    _teaConfig = EBLoadTeaConfig();
+    _teaConfigLoaded = YES;
+    EBTraceLap("tea config");
 
     // Overrides beat the stored settings, which is what makes them usable for testing: the
     // sandboxed preferences cache in cfprefsd is not reliably writable from outside the app.
@@ -103,11 +112,13 @@ static const long EBTeaEventDeferCapSec = 150;
                                NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:@"test"
                                                                               action:NULL
                                                                        keyEquivalent:@""];
-                               // The kind is settable so a config change can be checked against every tea, not just the
-                               // first one in the list.
-                               const char *kindEnv = getenv("EYELEO_TEST_TEA_KIND");
-                               item.representedObject =
-                                   @(kindEnv ? (EBDrinkKind)atoi(kindEnv) : EBDrinkGreen);
+                                // The tea is named rather than numbered, so a config change can be
+                                // checked against any tea, not just the first one in the list. The name is
+                                // carried through as it is and resolved when the action runs: at this
+                                // point the config may not have been read yet, and reading it here would
+                                // load it on every launch that happens to set this variable.
+                                const char *nameEnv = getenv("EYELEO_TEST_TEA_NAME");
+                                item.representedObject = @(nameEnv ? nameEnv : "green");
                                [self startTea:item];
                            });
         }
@@ -293,7 +304,7 @@ static const long EBTeaEventDeferCapSec = 150;
         if (_tea.finished) {
             // The last steep ran out: the tea is brewed. Say so once, briefly, then clear the screen.
             [_overlays showTeaReminderWithCaption:caption
-                                            image:[EBAssets.shared drinkImage:_tea.kind]
+                                            image:[self brewingVessel]
                                            msLeft:0
                                     autoDismissMs:EBTeaReadyNoticeMs];
             if (EBTraceOn())
@@ -310,22 +321,35 @@ static const long EBTeaEventDeferCapSec = 150;
     [_overlays updateTeaReminderCaption:EBTeaSessionCaption(&_teaConfig, &_tea, russian) msLeft:_tea.msLeft];
 }
 
+// The vessel for whatever is in the pot, named after the tea in tea.conf. Nil when there is no session,
+// which every caller has already established by the time it asks.
+- (nullable NSImage *)brewingVessel {
+    const EBTeaScheme *tea = EBTeaSessionTea(&_teaConfig, &_tea);
+    return tea ? [EBAssets.shared drinkImageNamed:@(tea->name)] : nil;
+}
+
 // Choosing a tea starts its first steep immediately.
 - (void)startTea:(NSMenuItem *)sender {
-    EBDrinkKind kind = (EBDrinkKind)[(NSNumber *)sender.representedObject integerValue];
-    if (kind == EBDrinkNone)
+    // The represented object is the tea's name, not its position. A name is what identifies a tea, it is
+    // what the test hook can set without the config having been read yet, and looking it up is a walk
+    // over a list of seven.
+    NSString *name = sender.representedObject;
+    if (![name isKindOfClass:[NSString class]] || name.length == 0)
         return;
     if (!_teaConfigLoaded) {
         _teaConfig = EBLoadTeaConfig();
         _teaConfigLoaded = YES;
     }
+    int tea = EBTeaSchemeIndexOfName(&_teaConfig, name.UTF8String);
+    if (tea < 0)
+        return; // not in the list: a tea deleted from tea.conf, or a name that never was one
     // A break owns the screen, so brewing cannot start during one. The brewing bubble itself does not
     // block: switching teas mid-session has to stay possible, and it is only on screen while nothing else
     // is.
     if (_overlays.anyVisible && !_overlays.teaReminderVisible)
         return;
 
-    EBTeaSessionStart(&_tea, &_teaConfig, kind);
+    EBTeaSessionStart(&_tea, &_teaConfig, tea);
     if (!EBTeaSessionValid(&_tea)) {
         EBTeaSessionStop(&_tea);
         return;
@@ -333,7 +357,7 @@ static const long EBTeaEventDeferCapSec = 150;
     BOOL russian = EBRussianNow();
     NSString *caption = EBTeaSessionCaption(&_teaConfig, &_tea, russian);
     [_overlays showTeaReminderWithCaption:caption
-                                    image:[EBAssets.shared drinkImage:kind]
+                                    image:[self brewingVessel]
                                    msLeft:_tea.msLeft
                             autoDismissMs:0];
     if (EBTraceOn())
@@ -355,7 +379,7 @@ static const long EBTeaEventDeferCapSec = 150;
     NSString *caption = EBTeaSessionCaption(&_teaConfig, &_tea, russian);
 
     [_overlays showTeaReminderWithCaption:caption
-                                    image:[EBAssets.shared drinkImage:_tea.kind]
+                                    image:[self brewingVessel]
                                    msLeft:_tea.msLeft
                             autoDismissMs:0];
     if (EBTraceOn())
@@ -454,20 +478,21 @@ static const long EBTeaEventDeferCapSec = 150;
                                        keyEquivalent:@""];
     NSMenu *teaMenu = [[NSMenu alloc] init];
     teaMenu.autoenablesItems = NO; // as above, for the same reason as the other two menus
-    static const EBDrinkKind kTeas[] = { EBDrinkGreen, EBDrinkWhite, EBDrinkOolong, EBDrinkBlack,
-                                         EBDrinkRed, EBDrinkPuer, EBDrinkHerbal };
-    for (size_t i = 0; i < sizeof(kTeas) / sizeof(kTeas[0]); i++) {
-        EBDrinkKind kind = kTeas[i];
-        NSMenuItem *item = [teaMenu addItemWithTitle:EBTeaName(kind, EBRussianNow())
+    // The teas are whatever tea.conf lists, in the order it lists them. Reading the list rather than a
+    // fixed one is the whole point of the file: a tea added to it turns up here without a rebuild, and
+    // one taken out of it disappears, which is a choice somebody has been able to make all along.
+    for (int i = 0; i < _teaConfig.count; i++) {
+        const EBTeaScheme *tea = &_teaConfig.schemes[i];
+        NSMenuItem *item = [teaMenu addItemWithTitle:EBTeaDisplayName(tea->name)
                                                action:@selector(startTea:)
                                         keyEquivalent:@""];
-        item.representedObject = @(kind);
+        item.representedObject = @(tea->name);
         item.enabled = !locked;
-        item.state = (brewing && _tea.kind == kind) ? NSControlStateValueOn : NSControlStateValueOff;
+        item.state = (brewing && _tea.tea == i) ? NSControlStateValueOn : NSControlStateValueOff;
         // The schedule as a tooltip, so the item title stays just the name. Whether AppKit paints a
         // tooltip on a menu item inside a status item menu is worth checking by eye; the Pour item above
         // carries the number that matters either way.
-        item.toolTip = EBTeaSchemeSummary(&_teaConfig, kind, EBRussianNow());
+        item.toolTip = EBTeaSchemeSummary(&_teaConfig, i, EBRussianNow());
     }
     newTea.submenu = teaMenu;
 
@@ -726,7 +751,7 @@ static const long EBTeaEventDeferCapSec = 150;
         return;
     BOOL russian = EBRussianNow();
     [_overlays showTeaReminderWithCaption:EBTeaSessionCaption(&_teaConfig, &_tea, russian)
-                                    image:[EBAssets.shared drinkImage:_tea.kind]
+                                    image:[self brewingVessel]
                                    msLeft:_tea.msLeft
                             autoDismissMs:0];
     if (EBTraceOn())

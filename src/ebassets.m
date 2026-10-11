@@ -6,6 +6,7 @@
 
 @implementation EBAssets {
     NSMutableDictionary<NSString *, NSImage *> *_cache;
+    NSMutableSet<NSString *> *_drinkKeys;
 }
 
 + (EBAssets *)shared {
@@ -20,6 +21,7 @@
 - (instancetype)init {
     if ((self = [super init])) {
         _cache = [NSMutableDictionary dictionary];
+        _drinkKeys = [NSMutableSet set];
     }
     return self;
 }
@@ -120,21 +122,85 @@ static const double kRetinaScale = 2.0;
         [_cache removeObjectForKey:kPersonageNames[i]];
 }
 
-// Indexed by the raw enum value, as with the personage frames above.
-static NSString *const kDrinkNames[EBNumDrinks] = {
-    @"tea_green", @"tea_white", @"tea_oolong", @"tea_black", @"tea_red", @"tea_puer", @"tea_herbal",
-    @"tea_water",
-};
+// The PNG header, read straight from the file: the eight-byte signature, then the IHDR chunk carrying the
+// width, the height, the bit depth and the colour type. NSImage will decode a JPEG that has been renamed to
+// .png and it reports nothing about the colour type, so the one property that matters here - whether the
+// vessel carries a real alpha channel - can only be answered from the bytes themselves.
+typedef struct {
+    uint32_t width;
+    uint32_t height;
+    uint8_t bitDepth;
+    uint8_t colourType;
+} EBPngHeader;
 
-- (NSImage *)drinkImage:(EBDrinkKind)drink {
-    if (drink <= EBDrinkNone || drink > EBDrinkWater)
+static BOOL ReadPngHeader(NSString *path, EBPngHeader *out) {
+    static const uint8_t kSignature[8] = { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A };
+    FILE *file = fopen(path.fileSystemRepresentation, "rb");
+    if (!file)
+        return NO;
+    uint8_t buf[26];
+    size_t read = fread(buf, 1, sizeof(buf), file);
+    fclose(file);
+
+    if (read != sizeof(buf) || memcmp(buf, kSignature, sizeof(kSignature)) != 0 || memcmp(buf + 12, "IHDR", 4) != 0)
+        return NO;
+    out->width = ((uint32_t)buf[16] << 24) | ((uint32_t)buf[17] << 16) | ((uint32_t)buf[18] << 8) | (uint32_t)buf[19];
+    out->height = ((uint32_t)buf[20] << 24) | ((uint32_t)buf[21] << 16) | ((uint32_t)buf[22] << 8) | (uint32_t)buf[23];
+    out->bitDepth = buf[24];
+    out->colourType = buf[25];
+    return YES;
+}
+
+- (nullable NSImage *)drinkImageNamed:(NSString *)name {
+    if (name.length == 0)
         return nil;
-    return [self load:kDrinkNames[drink - 1]];
+    NSString *key = [NSString stringWithFormat:@"tea_%@", name];
+    NSImage *cached = _cache[key];
+    if (cached)
+        return cached;
+
+    NSString *path = [NSBundle.mainBundle pathForResource:key ofType:@"png"];
+    if (!path) {
+        NSLog(@"[EyeLeo] no vessel %@.png, nothing will be drawn in the glass slot", key);
+        return nil;
+    }
+
+    // The three checks below are what separate a vessel from a picture that happens to be named like one.
+    // They cost a file read on first use and nothing after that, and each one has a failure that shows up
+    // on screen as a black box or a bubble that will not draw: without an alpha channel a PNG composites
+    // against black, and oversized artwork is cropped off the edge of the slot.
+    EBPngHeader header;
+    if (!ReadPngHeader(path, &header)) {
+        NSLog(@"[EyeLeo] vessel %@.png is not a PNG", key);
+        return nil;
+    }
+    if (header.bitDepth != EBPngBitDepth || header.colourType != EBPngColourTypeRGBA) {
+        NSLog(@"[EyeLeo] vessel %@.png is %u-bit colour type %u, want %u-bit RGBA (%u) with a real alpha channel",
+              key, header.bitDepth, header.colourType, EBPngBitDepth, EBPngColourTypeRGBA);
+        return nil;
+    }
+    const uint32_t maxW = (uint32_t)EBDrinkSlotWidthPt * 2;
+    const uint32_t maxH = (uint32_t)EBDrinkSlotHeightPt * 2;
+    if (header.width > maxW || header.height > maxH) {
+        NSLog(@"[EyeLeo] vessel %@.png is %ux%u, larger than the %ux%u slot", key, header.width, header.height,
+              maxW, maxH);
+        return nil;
+    }
+
+    NSImage *image = [[NSImage alloc] initWithContentsOfFile:path];
+    if (!image) {
+        NSLog(@"[EyeLeo] vessel %@.png did not decode", key);
+        return nil;
+    }
+    _cache[key] = image;
+    [_drinkKeys addObject:key];
+    return image;
 }
 
 - (void)purgeDrinks {
-    for (int i = 0; i < EBNumDrinks; i++)
-        [_cache removeObjectForKey:kDrinkNames[i]];
+    for (NSString *key in _drinkKeys)
+        [_cache removeObjectForKey:key];
+    [_drinkKeys removeAllObjects];
 }
 
 @end
