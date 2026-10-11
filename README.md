@@ -134,6 +134,18 @@ Enable **Open at login** only once the app is in `/Applications`. It registers t
 Note that `make run` launches the copy in `build/`, so running it while the installed copy is up is
 exactly the two-instance case the install guard complains about.
 
+**`build/EyeLeo.app` shows up as a second EyeLeo.** macOS registers an app with the system the first time
+it is launched, and LaunchServices never forgets: delete the folder and the name stays in "Applications"
+until something deregisters it. Three of them accumulated here — the installed copy, the one in `build/`,
+and two whose folders were long gone. `make clean` removes the folder; it does not remove the name:
+
+```
+LSREG=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+"$LSREG" -u /full/path/to/EyeLeo.app
+```
+
+That is only worth doing when the leftover bothers you. Every `make` puts the entry back.
+
 ## Why Objective-C and not Swift
 
 The brief asked for the smallest possible memory footprint, and that is decided by the language,
@@ -174,8 +186,10 @@ How the footprint stays low:
 The application asks the operating system for **nothing**. No permission dialog can appear, because
 no API that triggers one is called.
 
-- App Sandbox, and the only entitlement in `entitlements.plist` is
-  `com.apple.security.app-sandbox`. No network client, no file access outside the container.
+- App Sandbox. `entitlements.plist` carries exactly two entries: `com.apple.security.app-sandbox` and an
+  exception for the single directory `~/.config/eyeleo-mac`, where the settings and the tea schedule live.
+  The second is what those two need to be a file a person can open and edit, which is what they are for.
+  No network client, no camera, no microphone.
 - No networking symbols are linked at all (`make measure` checks this), so it cannot phone home even
   if a future change tried to.
 - The original hooked the mouse and keyboard globally. On macOS that would mean an Accessibility or
@@ -185,7 +199,7 @@ no API that triggers one is called.
   `CGWindowListCopyWindowInfo`, which exposes window bounds without Screen Recording.
 - Notifications are drawn as the app's own bubble rather than through `UNUserNotificationCenter`,
   which would have required the Notifications grant.
-- The only thing written to disk is `settings.xml` in the app container, via `CFPreferences`. There
+- The only things written to disk are `tea.conf` and `settings.xml`, both in `~/.config/eyeleo-mac`. There
   is no log file: the original opened and closed `log.txt` on every single message, which was both
   slow and a quiet record of when you were working.
 - Ad-hoc signed (`codesign -s -`). `codesign --verify --strict` passes. Not notarised, which is fine
@@ -358,9 +372,11 @@ repeated name keeps the first definition and refuses the second, so an old block
 down cannot quietly override a schedule. A single bad line is dropped and the rest of the file is still
 used; only a file with nothing usable in it falls back to the built-ins.
 
-**A tea with no translation shows its own name.** `tea_name_jasmine` in the language pack gives a name for
-anything with a key there, and the name from `tea.conf` is the fallback. It is a fallback rather than an
-empty line, so an added tea is legible before anyone has written anything for it.
+**The display name is written on the tea's own line**, as `en="..."` and `ru="..."`, and the name from
+`tea.conf` is the fallback for a language that has none. It is a fallback rather than an empty line, so an
+added tea is legible before anyone has written anything for it. The name is quoted because it may contain
+a comma, and a comma outside the quotes is what separates one field from the next. The language packs are
+not involved any more: a key there cannot override the line, and `tea_name_*` is not read at all.
 
 **A vessel per tea, and none is acceptable.** A tea draws `tea_<name>.png`, checked when it loads: PNG,
 8 bits a sample, colour type 6 so there is a real alpha channel, and no larger than 142x88 px, which is
@@ -400,7 +416,8 @@ test writes a plist with real booleans and checks that `<false/>` is read as fal
 absent.
 
 Related: writing the plist file directly, even with `plistlib`, changes nothing observable, because
-`CFPreferencesCopyAppValue` is served from `cfprefsd`'s cache. See the gotchas section.
+This mattered while the settings went through `CFPreferences`, which `cfprefsd` serves from a cache: a
+file written by hand was ignored by the running app. They are a plain file now, so it does not.
 
 ## Taking the keyboard and mouse during a break
 
@@ -508,9 +525,9 @@ is not in the menu, launch with `EYELEO_DEBUG=1` and read what it printed about 
 | `EYELEO_TEST_TEA_SEC=N` | fires the tea bubble after N seconds |
 | `EYELEO_TEST_TEA_NAME=name` | which tea the tea bubble shows, by its name from `tea.conf` |
 
-The overrides beat stored settings on purpose: `cfprefsd` caches preferences per app, so editing the
-container plist from a shell is not reliably visible to the sandboxed app. That is why they exist
-rather than a plist-editing step in the runbook.
+The overrides beat stored settings on purpose, which is how they were useful at the time: `cfprefsd`
+cached preferences per app, so a plist edited from a shell was not reliably visible to the sandboxed
+app. That is why they exist rather than a step of editing the settings file in the runbook.
 
 While any `EYELEO_TEST_*` override is active the app sets `persistenceSuspended`, and `saveSettings`
 becomes a no-op. Without it an accelerated run rewrites the break intervals into the real settings on
@@ -645,6 +662,7 @@ appearing or hiding, tears down every overlay so nothing is left stranded at the
 
 ```
 src/ebcore.{h,m}       state machine, settings, statistics; no AppKit, so it is unit-testable
+src/ebconfig.{h,m}    where the two files live, and moving them out of the container on first run
 src/ebdetect.{h,m}    activity and fullscreen detection, the only CoreGraphics dependency
 src/ebtext.{h,m}      localized durations and plural rules
 src/ebassets.{h,m}    lazy image loading
@@ -661,6 +679,8 @@ tools/mkframes.m      builds every generated frame and vessel: keys off the flat
 tools/gen_strings.py  regenerates both .strings files from the original langpacks
 tools/mkicon.m        draws the menu bar template icons and the app icon
 tools/measure.sh      the numbers above
+tools/checktea.awk    checks a tea.conf against the same rules the parser uses, without running the app
+docs/tea.md           how to add a tea, name it, give it a picture, and read why one was refused
 tools/check_strings.m localization coverage and plural spot-checks
 tools/windows.m       lists on-screen windows (bounds only; needs no permission)
 tools/smoke.sh       end-to-end check of the built app, not just the core
