@@ -87,12 +87,12 @@ $(APP_BUNDLE): $(SOURCES) $(HEADERS) Info.plist entitlements.plist $(RESOURCES) 
 	@echo "built $(APP_BUNDLE)"
 
 # The tests link the core against a stub detector, so they run without a window server.
-$(BUILD)/ebtest: tests/ebtest.m tests/ebdetect_stub.c src/ebcore.m src/ebtext.m src/ebgeometry.m src/ebassets.m src/ebexercise.m src/ebtea.m $(HEADERS)
+$(BUILD)/ebtest: tests/ebtest.m tests/ebdetect_stub.c src/ebcore.m src/ebtext.m src/ebgeometry.m src/ebassets.m src/ebexercise.m src/ebtea.m src/ebconfig.m $(HEADERS)
 	@mkdir -p $(BUILD)
 	@$(CC) -std=gnu11 -O1 -g -fobjc-arc -mmacosx-version-min=$(DEPLOYMENT_TARGET) -I src \
 	    -Wall -Wextra -Wno-unused-parameter \
 	    -o $@ tests/ebtest.m tests/ebdetect_stub.c src/ebcore.m src/ebtext.m src/ebgeometry.m \
-	    src/ebassets.m src/ebexercise.m src/ebtea.m \
+	    src/ebassets.m src/ebexercise.m src/ebtea.m src/ebconfig.m \
 	    -framework Foundation -framework AppKit -framework QuartzCore
 
 test: $(BUILD)/ebtest

@@ -79,7 +79,8 @@ fi
 echo
 echo "== localization =="
 clang -O2 -fobjc-arc -mmacosx-version-min=26.0 -Isrc -o build/checkstrings \
-    tools/check_strings.m src/ebtext.m src/ebcore.m tests/ebdetect_stub.c -framework Foundation 2>/dev/null
+    tools/check_strings.m src/ebtext.m src/ebcore.m src/ebconfig.m tests/ebdetect_stub.c \
+    -framework Foundation 2>/dev/null
 for lang in en ru; do
     missing=$(./build/checkstrings "build/EyeLeo.app" "$lang" 2>/dev/null | sed -n 's/^keys checked: [0-9]*, missing: //p')
     if [[ "${missing:-1}" == "0" ]]; then

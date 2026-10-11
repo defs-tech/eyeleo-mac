@@ -215,16 +215,34 @@ EXTRA = {
         # The tea submenu. The steeps themselves are timed from tea.conf, not from strings.
         "tb_menu_pour": "Pour",
         "tb_menu_new_tea": "New tea",
-        # One entry per built-in tea, keyed by the name from tea.conf. A tea added to that file has no
-        # key here, and shows under its own name until it is given one: the name is the fallback, not an
-        # empty line. See EBTeaDisplayName in src/ebtea.m.
-        "tea_name_black": "Black tea",
-        "tea_name_green": "Green tea",
-        "tea_name_herbal": "Herbal tea",
-        "tea_name_oolong": "Oolong",
-        "tea_name_puer": "Pu-erh",
-        "tea_name_red": "Red tea",
-        "tea_name_white": "White tea",
+    },
+    "ru": {
+        "status.error": "EyeLeo отдыхает",
+        "tb_menu_open_at_login": "Запускать при входе",
+        # The tea submenu. The steeps themselves are timed from tea.conf, not from strings.
+        "tb_menu_pour": "Пролив",
+        "tb_menu_new_tea": "Новый чай",
+        "settings_start_at_login": "Open at login",
+        "settings_start_at_login_tooltip": "Let macOS start EyeLeo when you log in",
+        "information_stats": "Statistics",
+        "information_stats_fmt": "Long breaks: %@\nShort breaks: %@\nSkipped long breaks: %@\nPostponed: %@\nRefused: %@",
+        # The original langpack carries this key with empty text, so the generator has it here rather than
+        # taking it from there. Without this line the licence text has to be typed in by hand after every
+        # rebuild, and the next rebuild takes it away again.
+        "information_license": "Licensed under CC BY-NC 4.0: reuse and modification are welcome with attribution, for non-commercial use only.",
+        "time.too_many_hours": "more than an hour",
+        "unit.minute.one": "minute",
+        "unit.minute.few": "minutes",
+        "unit.minute.many": "minutes",
+        "unit.second.one": "second",
+        "unit.second.few": "seconds",
+        "unit.second.many": "seconds",
+        "unit.hour.one": "hour",
+        "unit.hour.few": "hours",
+        "unit.hour.many": "hours",
+        # The tea submenu. The steeps themselves are timed from tea.conf, not from strings.
+        "tb_menu_pour": "Pour",
+        "tb_menu_new_tea": "New tea",
     },
     "ru": {
         "status.error": "EyeLeo отдыхает",
@@ -237,6 +255,7 @@ EXTRA = {
         "tea_name_black": "Чёрный чай",
         "tea_name_green": "Зелёный чай",
         "tea_name_herbal": "Травяной чай",
+        "tea_name_milky_oolong": "Молочный улун",
         "tea_name_oolong": "Улун",
         "tea_name_puer": "Пуэр",
         "tea_name_red": "Красный чай",

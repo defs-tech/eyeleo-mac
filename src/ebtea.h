@@ -12,15 +12,25 @@
 
 #import <Foundation/Foundation.h>
 
+#import "ebconfig.h"
+
 NS_ASSUME_NONNULL_BEGIN
 
 // How many steeps one tea may have. Eight is the longest schedule that ships (pu-erh), so it is the
 // ceiling rather than an arbitrary number. The Windows build keeps them in a fixed array of this size.
 enum { EBMaxSteeps = 8 };
 
+// The display names a tea line may carry, as en="..." and ru="...". Both are optional and either may be
+// absent: what a tea has no name for is shown under its name from tea.conf.
+typedef struct {
+    char *en;                            // owned, or NULL
+    char *ru;                            // owned, or NULL
+} EBTeaNames;
+
 // One tea and the schedule of its steeps.
 typedef struct {
     char *name;                          // from tea.conf, ASCII lowercase, owned
+    EBTeaNames names;                    // display names, as written on the same line
     double temperatureC;                 // for the caption
     int *seconds;                        // seconds per steep, owned
     int count;
@@ -49,9 +59,6 @@ EBTeaConfig EBLoadTeaConfig(void);
 // configurations rather than only against whatever happens to be on disk. Never returns an empty config:
 // text with no usable tea in it yields the built-in schedules, exactly as the file case does.
 EBTeaConfig EBParseTeaConfig(NSString *text);
-
-// Where tea.conf lives, for the comment shown in the settings.
-NSString *EBTeaConfigPath(void);
 
 // A brewing session. Held by value so the countdown owns a copy and the menu can inspect it without
 // reaching through the app delegate. It refers to its tea by index rather than by pointer: the config is
@@ -92,9 +99,10 @@ BOOL EBTeaSessionPour(EBTeaSession *s, const EBTeaConfig *config);
 // How many seconds the next steep will run for, or 0 if there is none.
 int EBTeaSessionNextSeconds(const EBTeaConfig *config, const EBTeaSession *s);
 
-// The display name of a tea, for the menu: tea_name_<name> from the language pack, falling back to the
-// name from tea.conf, which is all a tea added without a translation is known by.
-NSString *EBTeaDisplayName(const char *name);
+// The name to show a tea under, in the language asked for: the one written on its tea.conf line, or the
+// name from tea.conf itself. The tea's own name is the fallback rather than an empty line, so a tea added
+// with no translation is legible rather than nameless.
+NSString *EBTeaDisplayName(const EBTeaScheme *tea, BOOL russian);
 
 // Text for the notification: the tea name, the step, the temperature. Wording follows the session state,
 // so a steep that has run out reads as finished rather than as the next one already under way.

@@ -122,9 +122,11 @@ If `/Applications` is not writable it suggests `sudo ditto build/EyeLeo.app /App
 rather than `sudo make install`, on purpose: the latter would compile as root and leave root-owned
 artifacts in `build/`.
 
-Settings and `tea.conf` live under `~/Library/Containers/local.eyeleo.EyeLeo`, keyed by bundle identifier
-rather than by path, so installing, replacing or moving the app leaves them alone. `make uninstall`
-deliberately does not remove that directory.
+Settings and `tea.conf` live in `~/.config/eyeleo-mac`. They used to sit in the app's sandbox container,
+four directories deep under a name derived from the bundle identifier, which is a poor place to ask
+somebody to keep their tea schedule. Moving them costs the app one sandbox exception, declared in
+`entitlements.plist` and limited to that one directory: see `docs/tea.md` for the reasoning.
+`make uninstall` deliberately does not remove it either.
 
 Enable **Open at login** only once the app is in `/Applications`. It registers the main bundle through
 `SMAppService`, and a bundle sitting in `build/` is not something LaunchServices will register reliably.
@@ -319,14 +321,18 @@ jasmine, 85, 30, 45, 60
 ```
 
 The menu follows the file. The first line is the first entry, so moving a line moves the entry, and the
-teas left out are simply not there. `tea.conf` lives in the app's container under
-`~/Library/Containers/local.eyeleo.EyeLeo/Data/Library/Application Support/EyeLeo`, and the app never
+teas left out are simply not there. `tea.conf` lives in `~/.config/eyeleo-mac`, and the app never
 rewrites it once it is there.
 
+The display names are written on the same line, as `en="..."` and `ru="..."`. A tea with neither is shown
+under its name from the file, and a name in a language this build does not carry is dropped while the tea
+stays.
+
 There is a template at the top of `tea.conf` in this repository, and it goes into the bundle. On the
-first run, if the file is not in the container yet, it is created from that template — once, and never
-over an existing one. That is the same arrangement the Windows build has had for several versions, and
-it is what stops the file from being something you have to create blind.
+first run, if the file is not in `~/.config/eyeleo-mac` yet, it is created from that template — once, and
+never over an existing one. That is the same arrangement the Windows build has had for several versions,
+and it is what stops the file from being something you have to create blind. Files from the old container
+location are moved across automatically, once, on the first run after updating.
 
 Seven teas ship with the usual steep times: white and green 10-15-20-25-30, oolong 15-25-35-45-60-75,
 black 20-30-40-50-60-70, red 7-10-15-20-25-30 at 95 C, puer 20-30-40-50-60-70-80-90 and herbal
@@ -551,12 +557,12 @@ used to be positioned against the full display, so it started at y=0, which is w
 60 pt Dock, 60 of its 71 points were under the panel and only the top sliver was visible. Every floating
 overlay now goes through `EBBottomRightRect` or `EBCenteredRect`, which take the work area.
 
-**Editing the settings plist behind cfprefsd's back changes nothing.** `CFPreferencesCopyAppValue` is
-served from `cfprefsd`'s cache, and writing `~/Library/Containers/.../local.eyeleo.EyeLeo.plist` with
-`plistlib` does not invalidate it. The symptom is convincing and completely misleading: the file on
-disk holds the new value, a fresh process still reports the old one, and the trace looks like a broken
-read. `killall -u $USER cfprefsd` makes the new value appear, which is what proved the code was fine.
-Edit settings through the app, or through `defaults write` on the domain, not by writing the file.
+**Settings are a plain file, and used not to be.** They went through `CFPreferencesCopyAppValue`, which
+is served from `cfprefsd`'s cache: writing `local.eyeleo.EyeLeo.plist` with `plistlib` did not
+invalidate it, so the file on disk held the new value while a fresh process still reported the old one.
+The symptom looked exactly like a broken read, and `killall -u $USER cfprefsd` making it disappear is
+what proved the code was fine. They are now `~/.config/eyeleo-mac/settings.xml`, read and written
+directly, so editing the file works and there is no cache in the way.
 
 **The panel sizes its picture view once, from the frame an animation opens on.** The short break creates
 the panel, sets the image view's frame from whatever the animation is showing at that moment, and from

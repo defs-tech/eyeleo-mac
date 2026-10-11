@@ -10,5 +10,21 @@
     -->
     <key>com.apple.security.app-sandbox</key>
     <true/>
+
+    <!--
+      The only path outside the app's own container, and it exists for one reason: tea.conf and the
+      settings are files people are meant to open, edit and back up. In the container they sat at a path
+      four directories deep under a name derived from the bundle identifier, which is a poor place to ask
+      someone to keep their tea schedule.
+
+      This is a "temporary exception" entitlement: Apple documents the family as temporary and rejects it
+      in App Store review. This app is not in the App Store and is signed ad hoc, so it works, and the
+      exception is limited to one directory it creates itself. Replacing it would mean giving up editing
+      the files, which is a worse trade than the one capability it buys.
+    -->
+    <key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
+    <array>
+        <string>/.config/eyeleo-mac/</string>
+    </array>
 </dict>
 </plist>

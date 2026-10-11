@@ -1,5 +1,6 @@
 #import "ebtea.h"
 
+#import "ebconfig.h"
 #import "ebcore.h"
 
 // The schedules the app falls back on when tea.conf lists no teas, and the ones shipped in the template
@@ -10,14 +11,16 @@ static const struct {
     double temperature;
     int seconds[EBMaxSteeps];
     int count;
+    const char *en;
+    const char *ru;
 } kBuiltInTeas[] = {
-    { "green", 80.0, { 10, 15, 20, 25, 30, 35, 0, 0 }, 6 },
-    { "white", 85.0, { 10, 15, 20, 25, 30, 0, 0, 0 }, 5 },
-    { "oolong", 85.0, { 15, 25, 35, 45, 60, 75, 0, 0 }, 6 },
-    { "black", 90.0, { 20, 30, 40, 50, 60, 70, 0, 0 }, 6 },
-    { "red", 95.0, { 7, 10, 15, 20, 25, 30, 0, 0 }, 6 },
-    { "puer", 99.0, { 20, 30, 40, 50, 60, 70, 80, 90 }, 8 },
-    { "herbal", 100.0, { 300, 360, 420, 480, 0, 0, 0, 0 }, 4 },
+    { "green", 80.0, { 10, 15, 20, 25, 30, 35, 0, 0 }, 6, "Green tea", "Зелёный чай" },
+    { "white", 85.0, { 10, 15, 20, 25, 30, 0, 0, 0 }, 5, "White tea", "Белый чай" },
+    { "oolong", 85.0, { 15, 25, 35, 45, 60, 75, 0, 0 }, 6, "Oolong", "Улун" },
+    { "black", 90.0, { 20, 30, 40, 50, 60, 70, 0, 0 }, 6, "Black tea", "Чёрный чай" },
+    { "red", 95.0, { 7, 10, 15, 20, 25, 30, 0, 0 }, 6, "Red tea", "Красный чай" },
+    { "puer", 99.0, { 20, 30, 40, 50, 60, 70, 80, 90 }, 8, "Pu-erh", "Пуэр" },
+    { "herbal", 100.0, { 300, 360, 420, 480, 0, 0, 0, 0 }, 4, "Herbal tea", "Травяной чай" },
 };
 enum { kNumBuiltInTeas = (int)(sizeof(kBuiltInTeas) / sizeof(kBuiltInTeas[0])) };
 
@@ -42,6 +45,67 @@ static BOOL NameIsValid(NSString *name) {
             return NO;
     }
     return YES;
+}
+
+// Splits a line into fields on commas, except for commas inside double quotes. The display names are
+// written as en="..." and a name is allowed to contain a comma, as in en="Milk, with a dash". Scanning
+// with a single toggle over the quotes is enough: the values are user text, they do not nest, and an
+// unterminated quote simply leaves the rest of the line as one field, which then fails to parse and is
+// reported like any other mistake.
+static NSArray<NSString *> *SplitFields(NSString *line) {
+    NSMutableArray<NSString *> *fields = [NSMutableArray array];
+    NSMutableString *field = [NSMutableString string];
+    BOOL quoted = NO;
+
+    for (NSUInteger i = 0; i < line.length; i++) {
+        unichar c = [line characterAtIndex:i];
+        if (c == '"') {
+            quoted = !quoted;
+            [field appendFormat:@"%C", c];
+        } else if (c == ',' && !quoted) {
+            [fields addObject:[field stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet]];
+            field = [NSMutableString string];
+        } else {
+            [field appendFormat:@"%C", c];
+        }
+    }
+    [fields addObject:[field stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet]];
+    return fields;
+}
+
+// Reads one en="..." or ru="..." field into the matching slot.
+//
+// Three answers, not two. A field that is not a name at all is left for the caller to try as a steep
+// time; a name for a language this build has goes in its slot; a name for a language it does not have is
+// recognised and dropped, because a tea written for another language is still a usable tea and refusing
+// the whole line over it would throw away a working schedule.
+typedef NS_ENUM(int, EBNameField) {
+    EBNameFieldNotAName = 0,
+    EBNameFieldTaken,
+    EBNameFieldOtherLanguage,
+};
+
+static EBNameField ParseNameField(NSString *text, EBTeaNames *names) {
+    NSRange open = [text rangeOfString:@"=\""];
+    if (open.location == NSNotFound || open.location < 2 || ![text hasSuffix:@"\""])
+        return EBNameFieldNotAName;
+
+    NSString *tag = [[text substringToIndex:open.location] lowercaseString];
+    if (![tag isEqualToString:@"en"] && ![tag isEqualToString:@"ru"])
+        return EBNameFieldOtherLanguage;
+
+    // Between the opening and the closing quote: skip the two characters of =", and the closing quote at
+    // the end.
+    NSRange value = NSMakeRange(open.location + 2, text.length - open.location - 3);
+    char *copy = strdup([[text substringWithRange:value] UTF8String]);
+    if ([tag isEqualToString:@"en"]) {
+        free(names->en);
+        names->en = copy;
+    } else {
+        free(names->ru);
+        names->ru = copy;
+    }
+    return EBNameFieldTaken;
 }
 
 // intValue answers 0 for text that is not a number at all, which would turn a typo into a silently dropped
@@ -85,6 +149,8 @@ static EBTeaConfig MakeBuiltInConfig(void) {
     for (int i = 0; i < cfg.count; i++) {
         EBTeaScheme *scheme = &cfg.schemes[i];
         scheme->name = strdup(kBuiltInTeas[i].name);
+        scheme->names.en = strdup(kBuiltInTeas[i].en);
+        scheme->names.ru = strdup(kBuiltInTeas[i].ru);
         scheme->temperatureC = kBuiltInTeas[i].temperature;
         scheme->count = kBuiltInTeas[i].count;
         scheme->seconds = calloc((size_t)(kBuiltInTeas[i].count), sizeof(int));
@@ -92,12 +158,6 @@ static EBTeaConfig MakeBuiltInConfig(void) {
             scheme->seconds[j] = kBuiltInTeas[i].seconds[j];
     }
     return cfg;
-}
-
-NSString *EBTeaConfigPath(void) {
-    NSString *support = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES)
-                            .firstObject;
-    return [support stringByAppendingPathComponent:@"EyeLeo/tea.conf"];
 }
 
 // Puts the template from the bundle where the user can find and edit it.
@@ -168,8 +228,8 @@ EBTeaConfig EBParseTeaConfig(NSString *text) {
         if (line.length == 0 || [line hasPrefix:@"#"])
             continue;
 
-        NSArray<NSString *> *parts = [line componentsSeparatedByString:@","];
-        NSString *name = [parts[0] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        NSArray<NSString *> *parts = SplitFields(line);
+        NSString *name = parts[0];
         if (!NameIsValid(name)) {
             Reject(lineNo, [NSString stringWithFormat:@"\"%@\" is not a usable name: one lowercase Latin "
                                                       @"word, letters, then digits or underscores",
@@ -194,13 +254,30 @@ EBTeaConfig EBParseTeaConfig(NSString *text) {
             continue;
         }
 
+        // Anything after the temperature is either a steep time in seconds or a display name written as
+        // en="..." or ru="...". The two are told apart by shape, which is why the name is quoted: a bare
+        // word could only be a mistyped time, and refusing it is more useful than guessing.
         NSMutableArray<NSNumber *> *seconds = [NSMutableArray array];
+        EBTeaNames names = {NULL, NULL};
         BOOL malformed = NO;
         for (NSUInteger i = 2; i < parts.count && !malformed; i++) {
+            NSString *field = parts[i];
+            EBNameField kind = ParseNameField(field, &names);
+            if (kind == EBNameFieldTaken)
+                continue;
+            if (kind == EBNameFieldOtherLanguage) {
+                // A tea written for a language this build does not carry. Not a reason to throw away the
+                // schedule, and the reason it went unnoticed is said out loud under EYELEO_DEBUG.
+                Report([NSString stringWithFormat:@"%@: \"%@\" names a language this build does not have, "
+                                                  @"the tea is shown under its name",
+                                                  name, field]);
+                continue;
+            }
+
             int v = 0;
-            NSString *field = [parts[i] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
             if (!ParseSteepSeconds(field, &v)) {
-                Reject(lineNo, [NSString stringWithFormat:@"%@: \"%@\" is not a steep time in whole seconds",
+                Reject(lineNo, [NSString stringWithFormat:@"%@: \"%@\" is neither a steep time in whole "
+                                                      @"seconds nor a name written as en=\"...\" or ru=\"...\"",
                                                   name, field]);
                 malformed = YES;
             } else if ((int)seconds.count >= EBMaxSteeps) {
@@ -210,11 +287,26 @@ EBTeaConfig EBParseTeaConfig(NSString *text) {
                 [seconds addObject:@(v)];
             }
         }
-        if (malformed || seconds.count == 0)
+        if (malformed) {
+            free(names.en);
+            free(names.ru);
             continue;
+        }
+        if (seconds.count == 0) {
+            free(names.en);
+            free(names.ru);
+            continue;
+        }
 
+        // Put in only what the line actually carried. Boxing a null char pointer produces NSNull rather
+        // than nil, and reading that back is a crash rather than an absent value.
+        NSMutableDictionary *entry = [@{ @"name": name, @"temp": @(temperature), @"seconds": seconds } mutableCopy];
+        if (names.en)
+            entry[@"en"] = @(names.en);
+        if (names.ru)
+            entry[@"ru"] = @(names.ru);
         [seen addObject:name];
-        [parsed addObject:[@{ @"name": name, @"temp": @(temperature), @"seconds": seconds } mutableCopy]];
+        [parsed addObject:entry];
     }
 
     // A file that lists no teas is read as no file at all. Otherwise a single bad line would leave the
@@ -235,6 +327,8 @@ EBTeaConfig EBParseTeaConfig(NSString *text) {
         NSArray<NSNumber *> *seconds = entry[@"seconds"];
         EBTeaScheme *scheme = &cfg.schemes[i];
         scheme->name = strdup(name.UTF8String);
+        scheme->names.en = entry[@"en"] ? strdup([entry[@"en"] UTF8String]) : NULL;
+        scheme->names.ru = entry[@"ru"] ? strdup([entry[@"ru"] UTF8String]) : NULL;
         scheme->temperatureC = [entry[@"temp"] doubleValue];
         scheme->count = (int)seconds.count;
         scheme->seconds = calloc((size_t)scheme->count, sizeof(int));
@@ -250,6 +344,8 @@ EBTeaConfig EBParseTeaConfig(NSString *text) {
 void EBTeaConfigFree(EBTeaConfig *config) {
     for (int i = 0; i < config->count; i++) {
         free(config->schemes[i].name);
+        free(config->schemes[i].names.en);
+        free(config->schemes[i].names.ru);
         free(config->schemes[i].seconds);
     }
     free(config->schemes);
@@ -353,21 +449,17 @@ int EBTeaSessionNextSeconds(const EBTeaConfig *config, const EBTeaSession *s) {
     return EBTeaSessionSteepSeconds(config, &next);
 }
 
-NSString *EBTeaDisplayName(const char *name) {
-    if (!name || !*name)
+NSString *EBTeaDisplayName(const EBTeaScheme *tea, BOOL russian) {
+    if (!tea || !tea->name || !*tea->name)
         return @"";
 
-    // A key with no entry comes back as the key rather than as nil, so a missing translation has to be
-    // recognised by comparing against the key that was asked for. Let it through and the menu shows
-    // "tea_name_jasmine" where a tea is supposed to be, which is the one thing a fallback must not do.
-    NSString *key = [NSString stringWithFormat:@"tea_name_%s", name];
-    NSString *translated = [NSBundle.mainBundle localizedStringForKey:key value:nil table:nil];
-    if (translated.length > 0 && ![translated isEqualToString:key])
-        return translated;
+    const char *chosen = russian ? tea->names.ru : tea->names.en;
+    if (chosen && *chosen)
+        return @(chosen);
 
-    // The name from tea.conf is the fallback rather than an empty line, so a tea added to the file is
-    // legible before anyone has written anything for it.
-    return @(name);
+    // The name from tea.conf is the fallback rather than an empty line, so a tea added to the file with no
+    // translation at all is legible rather than nameless.
+    return @(tea->name);
 }
 
 NSString *EBTeaSessionCaption(const EBTeaConfig *config, const EBTeaSession *s, BOOL russian) {
@@ -378,7 +470,7 @@ NSString *EBTeaSessionCaption(const EBTeaConfig *config, const EBTeaSession *s, 
 
     // The wording is assembled here rather than as a format string in the .strings file: the step count is
     // a number that has to sit inside a sentence in two languages, and Russian puts it in a different place.
-    NSString *name = EBTeaDisplayName(sc ? sc->name : "");
+    NSString *name = EBTeaDisplayName(sc, russian);
 
     if (s->finished) {
         return russian ? [NSString stringWithFormat:@"%@ готов", name]

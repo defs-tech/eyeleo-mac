@@ -1,5 +1,7 @@
 #import "ebapp.h"
 
+#import "ebconfig.h"
+
 #import <AudioToolbox/AudioToolbox.h>
 #import <ServiceManagement/ServiceManagement.h>
 #import <time.h>
@@ -76,6 +78,10 @@ static const long EBTeaEventDeferCapSec = 150;
         _core.fastMode = YES;
         NSLog(@"[EyeLeo] EYELEO_FAST_MODE=1, timers are accelerated");
     }
+
+    // Before anything is read. The two files used to sit in the app's sandbox container; this puts them in
+    // ~/.config/eyeleo-mac, and does nothing at all once they are there.
+    EBMigrateLegacyConfig();
 
     EBTraceLap("settings load");
     BOOL loaded = [_core loadSettings];
@@ -483,7 +489,7 @@ static const long EBTeaEventDeferCapSec = 150;
     // one taken out of it disappears, which is a choice somebody has been able to make all along.
     for (int i = 0; i < _teaConfig.count; i++) {
         const EBTeaScheme *tea = &_teaConfig.schemes[i];
-        NSMenuItem *item = [teaMenu addItemWithTitle:EBTeaDisplayName(tea->name)
+        NSMenuItem *item = [teaMenu addItemWithTitle:EBTeaDisplayName(tea, EBRussianNow())
                                                action:@selector(startTea:)
                                         keyEquivalent:@""];
         item.representedObject = @(tea->name);

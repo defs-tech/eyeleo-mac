@@ -1,4 +1,6 @@
 #import "ebcore.h"
+
+#import "ebconfig.h"
 #import "ebdetect.h"
 #import "ebtext.h"
 
@@ -204,14 +206,6 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
     return self;
 }
 
-// Not owned: either the bundle's identifier or the string retained by preferencesDomain.
-- (CFStringRef)storageId {
-    if (_preferencesDomain)
-        return (__bridge CFStringRef)_preferencesDomain;
-    CFStringRef id = CFBundleGetIdentifier(CFBundleGetMainBundle());
-    return id ? id : CFSTR("local.eyeleo.EyeLeo");
-}
-
 - (EBSettings)defaultSettings {
     // EyeApp::ResetSettings, source/code/main.cpp:1192
     EBSettings s;
@@ -284,14 +278,14 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
 #pragma mark - Settings
 
 - (BOOL)loadSettings {
-    CFPropertyListRef stored = CFPreferencesCopyAppValue(CFSTR("eyeleo"), [self storageId]);
+    // A file of its own rather than cfprefsd. The container location was unreachable by hand, and the
+    // preference store kept the whole thing under one key in a plist with a name nobody would guess.
+    // Prefixes and dots for the sub-tree that used to live under the "eyeleo" key are not needed: the file
+    // is the settings, not a wrapper around them.
+    NSDictionary *stored = EBReadSettings(EBSettingsPathForDomain(_preferencesDomain));
     if (!stored)
         return NO; // nothing written yet: fresh install
-
-    NSDictionary *root = CFBridgingRelease(stored);
-    if (![root isKindOfClass:NSDictionary.class])
-        return NO;
-    CFDictionaryRef r = (__bridge CFDictionaryRef)root;
+    CFDictionaryRef r = (__bridge CFDictionaryRef)stored;
 
     CFStringRef big = CFSTR("big_pause"), mini = CFSTR("mini_pause"), warn = CFSTR("warning");
     CFStringRef sounds = CFSTR("sounds"), strict = CFSTR("strict_mode"), nearby = CFSTR("window_nearby");
@@ -402,9 +396,10 @@ static unsigned ReadUInt(CFDictionaryRef root, CFStringRef section, CFStringRef 
     PutInt(root, stats, CFSTR("last_big_pause_time_left"), (int)_stats.lastBigPauseTimeLeft);
     PutInt(root, stats, CFSTR("last_mini_pause_time_left"), (int)_stats.lastMiniPauseTimeLeft);
 
-    CFStringRef domain = [self storageId];
-    CFPreferencesSetAppValue(CFSTR("eyeleo"), root, domain);
-    CFPreferencesAppSynchronize(domain);
+    if (!EBWriteSettings(EBSettingsPathForDomain(_preferencesDomain), (__bridge NSDictionary *)root)) {
+        CFRelease(root);
+        return;
+    }
     CFRelease(root);
 }
 

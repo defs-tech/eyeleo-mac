@@ -545,30 +545,22 @@ static void TestResumeAcrossRestart(void) {
 static void TestBooleansFromAnyPlistWriter(void) {
     printf("booleans written as true/false\n");
     NSString *domain = @"local.eyeleo.EyeLeoTestsBooleans";
-    NSString *path = [NSHomeDirectory() stringByAppendingPathComponent:
-        [NSString stringWithFormat:@"Library/Preferences/%@.plist", domain]];
 
+    // The file is the settings, sections at the top level. It used to be a preferences plist with the whole
+    // thing under an "eyeleo" key and cfprefsd's caching in between; none of that is in the way now.
     NSDictionary *stored = @{
-        @"eyeleo": @{
-            @"sounds": @{ @"enabled": @NO },
-            @"strict_mode": @{ @"enabled": @YES },
-            // A number where the app writes a number, to prove both encodings work side by side.
-            @"mini_pause_fullscreen": @{ @"enabled": @0 },
-            @"window_nearby": @{ @"enabled": @1 },
-        }
+        @"sounds": @{ @"enabled": @NO },
+        @"strict_mode": @{ @"enabled": @YES },
+        // A number where the app writes a number, to prove both encodings work side by side.
+        @"mini_pause_fullscreen": @{ @"enabled": @0 },
+        @"window_nearby": @{ @"enabled": @1 },
     };
     NSData *xml = [NSPropertyListSerialization dataWithPropertyList:stored
                                                              format:NSPropertyListXMLFormat_v1_0
                                                             options:0
                                                               error:NULL];
-    [xml writeToFile:path atomically:YES];
-
-    // CFPreferences caches per domain, so the freshly written file has to be registered with it
-    // rather than merely sitting on disk.
-    CFPreferencesSetAppValue((__bridge CFStringRef)@"eyeleo",
-                             (__bridge CFPropertyListRef)stored[ @"eyeleo" ],
-                             (__bridge CFStringRef)domain);
-    CFPreferencesAppSynchronize((__bridge CFStringRef)domain);
+    [[NSFileManager defaultManager] removeItemAtPath:EBSettingsPathForDomain(domain) error:NULL];
+    Check(EBWriteSettings(EBSettingsPathForDomain(domain), stored), @"the hand-written file is written");
 
     EBCore *core = [[EBCore alloc] init];
     core.preferencesDomain = domain;
@@ -822,6 +814,75 @@ static void TestAnimationCadence(void) {
     for (int t = 0; t < 40; t++)
         [window advance];
     Check(window.transform.m11 == 1.0f, @"window exercise holds still");
+}
+
+static void TestTeaNames(void) {
+    printf("tea display names\n");
+
+    // Names on the line, in both languages, which is the whole point of putting them there: a tea added to
+    // tea.conf gets a proper label without anything being installed or rebuilt.
+    EBTeaConfig cfg = EBParseTeaConfig(@"jasmine, 85, 30, 45, en=\"Jasmine\", ru=\"Жасмин\"\n");
+    CheckEq(cfg.count, 1, @"a tea with both names");
+    if (cfg.count == 1) {
+        Check([EBTeaDisplayName(&cfg.schemes[0], NO) isEqualToString:@"Jasmine"], @"english name");
+        Check([EBTeaDisplayName(&cfg.schemes[0], YES) isEqualToString:@"Жасмин"], @"russian name");
+    }
+    EBTeaConfigFree(&cfg);
+
+    // A name is allowed to contain the separator, which is why it is written in quotes at all.
+    EBTeaConfig commas = EBParseTeaConfig(@"milk, 85, 30, en=\"Milk, with a dash\"\n");
+    CheckEq(commas.count, 1, @"a comma inside the quotes does not split the line");
+    if (commas.count == 1) {
+        CheckEq((int)commas.schemes[0].count, 1, @"and the one steep is still read");
+        Check([EBTeaDisplayName(&commas.schemes[0], NO) isEqualToString:@"Milk, with a dash"], @"name intact");
+    }
+    EBTeaConfigFree(&commas);
+
+    // One language is enough. The other falls back to the name from the file rather than to nothing.
+    EBTeaConfig one = EBParseTeaConfig(@"oolong, 85, 30, en=\"Oolong\"\n");
+    CheckEq(one.count, 1, @"a tea with one name");
+    if (one.count == 1) {
+        Check([EBTeaDisplayName(&one.schemes[0], NO) isEqualToString:@"Oolong"], @"the name that is there");
+        Check([EBTeaDisplayName(&one.schemes[0], YES) isEqualToString:@"oolong"], @"the other language gets the slug");
+    }
+    EBTeaConfigFree(&one);
+
+    // A name for a language this build does not carry is dropped, and the schedule is kept regardless:
+    // refusing the line would throw away a working tea over a label nobody here will read.
+    EBTeaConfig other = EBParseTeaConfig(@"genmaicha, 85, 30, de=\"Genmaicha\"\n");
+    CheckEq(other.count, 1, @"a name in an unknown language keeps the tea");
+    if (other.count == 1)
+        Check([EBTeaDisplayName(&other.schemes[0], NO) isEqualToString:@"genmaicha"], @"shown under the slug");
+    EBTeaConfigFree(&other);
+
+    // No names at all: the slug, which is what a tea added bare looked like before.
+    EBTeaConfig bare = EBParseTeaConfig(@"jasmine, 85, 30\n");
+    Check([EBTeaDisplayName(&bare.schemes[0], NO) isEqualToString:@"jasmine"], @"no name at all is the slug");
+    EBTeaConfigFree(&bare);
+
+    // A field that is neither a number nor a quoted name still refuses the line, rather than being
+    // guessed at: a mistyped time is a mistake worth reporting, not something to work around.
+    EBTeaConfig bad = EBParseTeaConfig(@"jasmine, 85, 30, Oolong\n");
+    CheckEq(bad.count, 7, @"a bare word where a time belongs refuses the line");
+    EBTeaConfigFree(&bad);
+
+    // An unterminated quote swallows the rest of the line and then fails, which is the intended outcome:
+    // the line is gone rather than half read.
+    EBTeaConfig unterminated = EBParseTeaConfig(@"jasmine, 85, 30, en=\"Jasmine\n");
+    CheckEq(unterminated.count, 7, @"an unterminated quote refuses the line");
+    EBTeaConfigFree(&unterminated);
+
+    // The built-in teas carry their own names, so a machine with no tea.conf at all still shows a menu in
+    // a language rather than a column of slugs.
+    EBTeaConfig builtin = EBParseTeaConfig(@"\n");
+    int green = EBTeaSchemeIndexOfName(&builtin, "green");
+    Check(green >= 0, @"green is among them");
+    if (green >= 0) {
+        Check([EBTeaDisplayName(&builtin.schemes[green], YES) isEqualToString:@"Зелёный чай"],
+              @"built-in russian name");
+        Check([EBTeaDisplayName(&builtin.schemes[green], NO) isEqualToString:@"Green tea"], @"built-in english name");
+    }
+    EBTeaConfigFree(&builtin);
 }
 
 static void TestTeaConfigSeeding(void) {
@@ -1346,12 +1407,19 @@ static void TestGeometry(void) {
 }
 
 int main(void) {
+    // The tests' settings file goes once, at the start of the run, and not in MakeCore: several tests build
+    // a second core on purpose to read back what the first one saved, and a cleanup there would delete the
+    // very thing being read.
+    [NSFileManager.defaultManager removeItemAtPath:EBSettingsPathForDomain(@"local.eyeleo.EyeLeoTests")
+                                              error:NULL];
+
     @autoreleasepool {
         printf("EyeLeo macOS core tests\n\n");
         TestPersonageFramesAndExercises();
         TestTeaConfigAndSession();
         TestTeaConfigParsing();
         TestTeaConfigSeeding();
+        TestTeaNames();
         TestDrinkVessels();
         TestAnimationCadence();
         TestWarningInterval();
