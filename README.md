@@ -57,10 +57,10 @@ Everything the original 1.3.6 did, unchanged and in full:
 Added in the port, in short:
 
 - **Three more exercises**, ids 8, 9 and 10, with five phrasings each in both languages.
-- **A hydration reminder**, on the same interval idea as a tea timer, with seven vessels and a
+- **A hydration reminder**, on the same interval idea as a tea timer, with its own glass and a
   configurable portion. Advisory only; it never takes input.
-- **A tea timer with manual steeps.** Seven teas with real steep times, and water as one more kind of
-  it, so "drink water" and "brew tea" are one menu rather than two features.
+- **A tea timer with manual steeps**, driven by a text file you can edit. Seven teas ship with real
+  steep times, and a line added to `tea.conf` becomes a menu entry without a rebuild.
 - **Sounds** on the end of a break and the end of every steep, under the setting that already existed.
 - **Strict mode**, which removes the Skip button and refuses to open the tray menu during a break.
 
@@ -122,7 +122,7 @@ If `/Applications` is not writable it suggests `sudo ditto build/EyeLeo.app /App
 rather than `sudo make install`, on purpose: the latter would compile as root and leave root-owned
 artifacts in `build/`.
 
-Settings and `tea.conf` live in `~/Library/Containers/local.eyeleo.EyeLeo`, keyed by bundle identifier
+Settings and `tea.conf` live under `~/Library/Containers/local.eyeleo.EyeLeo`, keyed by bundle identifier
 rather than by path, so installing, replacing or moving the app leaves them alone. `make uninstall`
 deliberately does not remove that directory.
 
@@ -307,19 +307,70 @@ The interval list is 15/20/25/30/45/60/90/120 and the portion list 50-250 ml. Th
 those two lists allow is 15 min x 250 ml = 1000 ml/hour, against the 1414 ml/hour ceiling above which
 NIOSH warns about water intoxication. No settings combination can breach it, and a test asserts it.
 
-**A tea timer, with water as one more kind of it.** The same bubble, the same menu, the same countdown,
-so water is the tea menu's first entry rather than a second feature. Seven teas ship with the usual
-steep times, white and green 10-15-20-25-30, oolong 15-25-35-45-60-75, black 20-30-40-50-60-70, red
-7-10-15-20-25-30 at 95 C, puer 20-30-40-50-60-70-80-90 and herbal 300-360-420-480, all in seconds.
-They live in `tea.conf` next to `settings.xml`, which is edited through the app rather than by hand in
-the container.
+**A tea timer you extend by editing a text file.** The same bubble, the same countdown, and a list of
+teas read from `tea.conf`. The name on each line is the tea's whole identity: it keys the picture file,
+and it is what the menu shows when nothing has translated it. Adding a line adds a menu entry, with no
+rebuild and nothing to register anywhere.
+
+```text
+# name, temperature in C, then one time per steep, in seconds
+green, 80, 10, 15, 20, 25, 30, 35
+jasmine, 85, 30, 45, 60
+```
+
+The menu follows the file. The first line is the first entry, so moving a line moves the entry, and the
+teas left out are simply not there. `tea.conf` lives in the app's container under
+`~/Library/Containers/local.eyeleo.EyeLeo/Data/Library/Application Support/EyeLeo`, and the app never
+rewrites it once it is there.
+
+There is a template at the top of `tea.conf` in this repository, and it goes into the bundle. On the
+first run, if the file is not in the container yet, it is created from that template — once, and never
+over an existing one. That is the same arrangement the Windows build has had for several versions, and
+it is what stops the file from being something you have to create blind.
+
+Seven teas ship with the usual steep times: white and green 10-15-20-25-30, oolong 15-25-35-45-60-75,
+black 20-30-40-50-60-70, red 7-10-15-20-25-30 at 95 C, puer 20-30-40-50-60-70-80-90 and herbal
+300-360-420-480. Those are also the fallback: a `tea.conf` that is empty, or made entirely of lines
+that do not parse, gives the built-in schedules instead, so the app works even if the file is ruined.
+
+**What a line has to satisfy.** All of it is enforced rather than assumed, and a line is taken whole or
+refused whole: there is no half-read schedule, and a bad line never leaves a stray steep behind.
+
+| Field | Rule |
+|---|---|
+| name | one word, no spaces: a lowercase Latin letter, then letters, digits or underscores, up to 24 characters |
+| temperature | a number over 0 and up to 100 |
+| steeps | 1 to 8 times, each a whole number of seconds between 1 and 3600 |
+
+Uppercase is refused rather than folded. A macOS volume is case-insensitive by default, so `Tea.png` and
+`tea.png` would be one file and a name differing only in case would quietly pick up another's picture. The
+same reason puts a cap of 24 on the length: the name is a filename, and a filename that can run to the
+end of the path is not one anybody wants to be handed by a text file.
+
+Eight steeps is a ceiling and not an arbitrary number: it is the longest schedule that ships, puer's. A
+repeated name keeps the first definition and refuses the second, so an old block of lines pasted lower
+down cannot quietly override a schedule. A single bad line is dropped and the rest of the file is still
+used; only a file with nothing usable in it falls back to the built-ins.
+
+**A tea with no translation shows its own name.** `tea_name_jasmine` in the language pack gives a name for
+anything with a key there, and the name from `tea.conf` is the fallback. It is a fallback rather than an
+empty line, so an added tea is legible before anyone has written anything for it.
+
+**A vessel per tea, and none is acceptable.** A tea draws `tea_<name>.png`, checked when it loads: PNG,
+8 bits a sample, colour type 6 so there is a real alpha channel, and no larger than 142x88 px, which is
+the 71x44 pt corner of the bubble at 2x. Anything failing that is refused and the slot is left empty, with
+the reason in the log. A tea with no picture at all still brews; it just has no glass.
 
 Steeping is deliberately manual. An automatic timer cannot know when you have actually poured the water
 off the leaves, so a countdown would be wrong for anyone who looks away, and the fix for that is a
 button rather than a smarter guess. The menu item counts down to the next steep, the bubble hides once a
 steep has been taken, and after the last one the bubble says the tea is ready and closes itself after
-five seconds. Tooltips on the menu list each kind's whole scheme at once, so choosing between them does
+five seconds. Tooltips on the menu list each tea's whole scheme at once, so choosing between them does
 not require starting one.
+
+**Water is not a tea.** It has no steeping schedule, it is not in `tea.conf`, and no line there can put
+it in the menu. It is the reminder above, with its own settings and its own glass, and it is a separate
+feature that happens to share a bubble.
 
 Two things the timer does not do. It does not stop for a break, because a steep that pauses while the
 user is looking at a screen is a bug, not a courtesy; and it does not remember the chosen tea on the next
@@ -434,9 +485,14 @@ EYELEO_DEBUG=1 EYELEO_TEST_WATER_SEC=6 ./build/EyeLeo.app/Contents/MacOS/EyeLeo
 
 All off unless the environment variable is set. `EYELEO_DEBUG` also traces every state transition.
 
+This is also where a tea that failed to appear gets its explanation, and it is the only place. Problems
+with `tea.conf` are reported here and nowhere else, on purpose: a refused line is a mistake in a file
+nobody is supposed to be editing, and the day it matters is the day somebody is. So if a tea you added
+is not in the menu, launch with `EYELEO_DEBUG=1` and read what it printed about your line.
+
 | Variable | Effect |
 | --- | --- |
-| `EYELEO_DEBUG=1` | state machine trace, startup stage timings, overlay traces |
+| `EYELEO_DEBUG=1` | state machine trace, startup stage timings, overlay traces, and every `tea.conf` line refused and why |
 | `EYELEO_FAST_MODE=1` | accelerates timers up to 8×, the port of `EyeApp::_fastMode` |
 | `EYELEO_TEST_INTERVAL_MIN=N` | overrides both break intervals to N minutes |
 | `EYELEO_TEST_ONLY=short\|long` | enables only one kind of break |
@@ -444,7 +500,7 @@ All off unless the environment variable is set. `EYELEO_DEBUG` also traces every
 | `EYELEO_TEST_OPEN_SETTINGS=1` | opens the settings window at launch |
 | `EYELEO_TEST_WATER_SEC=N` | fires the hydration reminder after N seconds |
 | `EYELEO_TEST_TEA_SEC=N` | fires the tea bubble after N seconds |
-| `EYELEO_TEST_TEA_KIND=name` | which tea or water the tea bubble shows |
+| `EYELEO_TEST_TEA_NAME=name` | which tea the tea bubble shows, by its name from `tea.conf` |
 
 The overrides beat stored settings on purpose: `cfprefsd` caches preferences per app, so editing the
 container plist from a shell is not reliably visible to the sandboxed app. That is why they exist
@@ -591,6 +647,7 @@ src/ebwindows.{h,m}   the five overlays
 src/ebgeometry.{h,m}   overlay placement as pure functions, unit-tested against synthetic screens
 src/ebsettingsui.{h,m} settings window
 src/ebtea.{h,m}      tea.conf parsing and the brewing session, no AppKit beyond strings
+tea.conf            the template copied into the container on first run; the app never edits it
 src/ebapp.{h,m}       menu bar, menu, scheduler, single instance, login item
 src/ebtrace.{h,m}     startup and state tracing
 tools/mkframes.m      builds every generated frame and vessel: keys off the flat background, aligns a
