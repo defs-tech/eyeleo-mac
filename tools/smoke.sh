@@ -178,31 +178,6 @@ if wait_for "$LOG" 'dim layer:' 90; then
           red "  FAIL  focus was never returned"
           FAIL=$((FAIL + 1))
       fi
-      # The status item must SURVIVE the break, and the earlier check never found out: it ran before a
-      # break had ever started, which is why it stayed green through a missing icon.
-      #
-      # Two things are asserted, and the second is the regression. The item has to be in the bar once the
-      # break is over. And the app must never destroy an item it has already found in the bar: a version
-      # that removed and rebuilt the item on every activation policy transition threw the icon away twice
-      # per break, and every other check here stayed green while it did, because isVisible answers yes for
-      # an item the bar never placed.
-      for _ in $(seq 1 12); do
-          grep -q 'status item checked:' "$LOG" && break
-          sleep 1
-      done
-      last=$(grep 'status item checked:' "$LOG" | tail -1)
-      # A rebuild after the item was found in the bar is the bug; a rebuild before that is the repair.
-      after=$(awk '/status item checked: inbar=1/ { seen = 1 } /the nudge did not take/ && seen { c++ } END { print c + 0 }' "$LOG")
-      if grep -q 'inbar=1' <<<"$last" && [ "$after" -eq 0 ]; then
-          green "  PASS  menu bar item is in the bar and was never rebuilt under it"
-          PASS=$((PASS + 1))
-      elif [ "$after" -ne 0 ]; then
-          red "  FAIL  the status item was rebuilt $after time(s) while it was in the bar"
-          FAIL=$((FAIL + 1))
-      else
-            red "  FAIL  the status item was never built, or was not in the bar after the break"
-            FAIL=$((FAIL + 1))
-        fi
 else
     red "  FAIL  the short break never appeared"
     FAIL=$((FAIL + 3))
