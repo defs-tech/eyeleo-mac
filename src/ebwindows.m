@@ -386,6 +386,11 @@ static NSButton *FlatButton(NSString *title, id target, SEL action) {
     // next break captured EyeLeo itself and the third early return made it permanent.
     NSApp.activationPolicy = NSApplicationActivationPolicyAccessory;
 
+    // The policy change above is what puts the app back in the menu bar, but on its own it is not enough:
+    // the transition out of Regular costs the status item, and AppKit does not reliably hand it back. The
+    // item is rebuilt by the delegate, which owns it, so ask for it here rather than reaching across.
+    [self.delegate overlayDidReturnToBackground];
+
     if (!previous)
         return; // nothing was captured, so there is nothing to give back
     if (EBTraceOn())

@@ -26,6 +26,11 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)overlayDidRequestPostpone;
 - (void)overlayDidRequestAccept;
 - (void)overlayDidRequestCloseShortBreak;
+// The app is background-only again after a break, and the menu bar item it should be living in has to be
+// put back. Going to NSApplicationActivationPolicyRegular and coming back costs the status item, and the
+// system does not reliably hand it back on its own: what the user sees is the Dock icon and no way to
+// reach the menu at all, which is the whole interface.
+- (void)overlayDidReturnToBackground;
 @end
 
 @interface EBOverlayController : NSObject

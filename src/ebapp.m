@@ -879,6 +879,23 @@ static const long EBTeaEventDeferCapSec = 150;
 
 #pragma mark - EBOverlayDelegate
 
+// Puts the menu bar item back after the app has been through a Regular policy and come out again.
+//
+// Rebuilt rather than repaired, and unconditionally. The status bar drops the item across that transition
+// and AppKit is not dependable about handing it back: the symptom is the Dock icon left with no menu bar
+// counterpart, and the menu is the whole interface, so there is no screen left to notice it on and nothing
+// to click. Rather than test for a condition that has already proved unreliable, the item is replaced every
+// time the app returns to being background-only. That is a status bar round trip a few times an hour, which
+// is nothing next to being left with no way into the program.
+- (void)overlayDidReturnToBackground {
+    if (self.statusItem) {
+        [[NSStatusBar systemStatusBar] removeStatusItem:self.statusItem];
+        self.statusItem = nil;
+    }
+    [self installStatusItem];
+    [self refreshStatusItem];
+}
+
 - (void)presentDemoShortBreak {
     EBSettings s = _core.settings;
     EBStats stats = _core.stats;
