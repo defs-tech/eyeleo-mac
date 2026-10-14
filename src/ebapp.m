@@ -25,7 +25,10 @@ static NSString *const kBundleID = @"local.eyeleo.EyeLeo";
 @property(nonatomic, strong, nullable) dispatch_source_t schedulerTimer;
 @property(nonatomic) uint64_t lastTickNanos;
 @property(nonatomic) BOOL reportedFirstTick;
-
+// Set from willSleep to didWake. The status item is never rebuilt while this is on: a rebuild during
+// sleep creates the item into a bar that is going away, and it comes back detached, which is exactly the
+// state a rebuild cannot detect and would go on repeating.
+@property(nonatomic) BOOL goingToSleep;
 // Whether there is a foreground session to take the keyboard from. Starts YES because that is the state
 // the app is launched into, and the only thing that turns it off is the screen being locked or the session
 // switched away. Tracked from the notifications rather than asked for, because asking means a call into
@@ -262,9 +265,18 @@ static const long EBTeaEventDeferCapSec = 150;
     self.lastTickNanos = [self nowNanos];
     [_core resumeFromPause];
     [self refreshStatusItem];
+
+    // The status bar is back and settled by the time anyone has clicked anything, which is the first
+    // moment at which an item detached by the transition can be told from one the bar is merely slow to
+    // place. willSleep deliberately did not touch it: during sleep there is no bar to check against.
+    self.goingToSleep = NO;
+    [self restoreStatusItemIfDetached];
 }
 
 - (void)willSleep {
+    // First, because hideAll below asks whether the status item still needs looking at, and the answer
+    // during sleep is not one to be acted on.
+    self.goingToSleep = YES;
     [_overlays hideAll];
     [_core saveSettings];
 }
@@ -445,6 +457,33 @@ static const long EBTeaEventDeferCapSec = 150;
 
 #pragma mark - Status item
 
+// Whether a status item is actually laid out in the menu bar.
+//
+// isVisible is no use as a test. It answers yes for an item the bar never placed, which is precisely how
+// an item that is nowhere on screen manages to report itself healthy, and why every earlier check here
+// stayed green through a missing icon. The question that can be answered is where the button ended up: an
+// item the bar holds sits in the topmost band of a display, one bar-thickness tall, and an item the bar
+// dropped or never claimed is somewhere else entirely. That is a measured difference rather than a flag.
+//
+// Vertical only, deliberately. Where the button sits along the bar is the system's business and changes
+// as other items come and go; whether it is in the bar at all is ours.
+static BOOL EBStatusItemInMenuBar(NSStatusItem *item) {
+    if (!item)
+        return NO;
+    NSWindow *window = item.button.window;
+    NSScreen *screen = window.screen ?: NSScreen.mainScreen;
+    if (!window || !screen)
+        return NO;
+
+    CGFloat top = NSMaxY(screen.frame);
+    CGFloat thickness = NSStatusBar.systemStatusBar.thickness;
+    NSRect onScreen = [window convertRectToScreen:item.button.frame];
+
+    // A point of slack, because the bar rounds. Without it a correctly placed item reads as outside on
+    // some displays, and a check that fails at random is worse than no check.
+    return NSMaxY(onScreen) <= top + 1.0 && NSMinY(onScreen) >= top - thickness - 1.0;
+}
+
 - (void)installStatusItem {
     self.statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSSquareStatusItemLength];
 
@@ -482,12 +521,16 @@ static const long EBTeaEventDeferCapSec = 150;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(),
                        ^{
                            NSRect f = item.button.window.frame;
+                           // attached is the one that can be trusted. isVisible answers yes for an item the
+                           // bar never laid out, which is how an item that is nowhere on screen can report
+                           // itself healthy; a window with something above it is a window the bar owns.
                            fprintf(stderr,
                                    "[EB] status item: icon=%s size=%.0fx%.0f template=%d "
-                                   "button=%.0f,%.0f %.0fx%.0f visible=%d bar=%.0f\n",
+                                   "button=%.0f,%.0f %.0fx%.0f visible=%d inbar=%d bar=%.0f\n",
                                    icon ? "ok" : "NIL", icon.size.width, icon.size.height, icon.isTemplate,
                                    f.origin.x, f.origin.y, f.size.width, f.size.height,
-                                   item.button.window.isVisible, NSStatusBar.systemStatusBar.thickness);
+                                   item.button.window.isVisible, EBStatusItemInMenuBar(item),
+                                   NSStatusBar.systemStatusBar.thickness);
                        });
     }
 }
@@ -879,35 +922,92 @@ static const long EBTeaEventDeferCapSec = 150;
 
 #pragma mark - EBOverlayDelegate
 
-// Puts the menu bar item back after the app has been through a Regular policy and come out again.
-//
-// Rebuilt rather than repaired, and unconditionally. The status bar drops the item across that transition
-// and AppKit is not dependable about handing it back: the symptom is the Dock icon left with no menu bar
-// counterpart, and the menu is the whole interface, so there is no screen left to notice it on and nothing
-// to click. Rather than test for a condition that has already proved unreliable, the item is replaced every
-// time the app returns to being background-only. That is a status bar round trip a few times an hour, which
-// is nothing next to being left with no way into the program.
-- (void)overlayDidReturnToBackground {
-    if (self.statusItem) {
-        [[NSStatusBar systemStatusBar] removeStatusItem:self.statusItem];
-        self.statusItem = nil;
-    }
-    [self installStatusItem];
-    [self refreshStatusItem];
 
-    // The trace installStatusItem leaves behind is fired half a second after the item is made, which is
-    // not long enough here: the status bar lays out asynchronously and this item is being rebuilt in the
-    // middle of a policy change, so that reading catches the item mid-flight and reports a frame that is
-    // not where it ends up. Reported again once it has settled, and the smoke test reads this line to
-    // tell a rebuilt item from a rebuilt object the menu bar never took back.
-    if (EBTraceOn()) {
-        NSStatusItem *item = self.statusItem;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            NSRect f = item.button.window.frame;
-            fprintf(stderr, "[EB] status item settled: visible=%d frame=%.0f,%.0f %.0fx%.0f\n",
-                    item.button.window.isVisible, f.origin.x, f.origin.y, f.size.width, f.size.height);
-        });
+// Called by the overlays when the app is background-only again. Checks on the next turn of the run loop,
+// not here: at the moment of the call the policy change has only been requested and nothing has settled,
+// and judging the item now would be judging it mid-transition.
+- (void)overlayDidReturnToBackground {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self restoreStatusItemIfDetached];
+    });
+}
+
+// Makes sure there is a status item to click, without ever destroying one that already works.
+//
+// The order of these steps is the whole of the fix. The obvious way to deal with an item lost across an
+// activation policy change is to remove it and put a fresh one in its place, and doing that here turned a
+// bug that cost the icon once in a while into the icon never being there at all. Two things made it worse
+// than merely useless:
+//
+// This is reached far more often than it looks. NSApplicationDidChangeScreenParametersNotification fires
+// at launch and on any display change, it goes to screenParametersChanged, that calls hideAll, and
+// hideAll ends up here. So the app was taking the icon it had just created at launch, throwing it away,
+// and building a replacement in the middle of the system still laying the bar out.
+//
+// And building a replacement during that settling is what loses it. The new item is handed a slot off the
+// edge of the bar and never appears, while isVisible goes on answering yes for it, which is why every
+// earlier check stayed green through a missing icon.
+//
+// So: an item that is there is left exactly as it is, an item that is merely misplaced is nudged rather
+// than replaced, and a replacement is built only when there is nothing left to nudge or nothing to keep at
+// all. Nothing here removes an item that has not already been shown to be in the bar, and not even then
+// until the bar has had a second chance to place it.
+- (void)restoreStatusItemIfDetached {
+    if (self.goingToSleep) {
+        // Not checked here, and not because the item is unimportant. A status item is created into a bar
+        // that is going away and comes back misplaced, which is the same thing a dropped item looks like,
+        // and reacting to that during sleep is how an item gets rebuilt into nothing. didWake checks
+        // instead, when the bar is back.
+        if (EBTraceOn())
+            fprintf(stderr, "[EB] status item: not checked, the machine is going to sleep\n");
+        return;
     }
+
+    NSStatusItem *item = self.statusItem;
+    if (!item) {
+        if (EBTraceOn())
+            fprintf(stderr, "[EB] status item: there is none, building one\n");
+        [self installStatusItem];
+        [self refreshStatusItem];
+        return;
+    }
+
+    NSRect f = [item.button.window convertRectToScreen:item.button.frame];
+    BOOL inBar = EBStatusItemInMenuBar(item);
+    if (EBTraceOn())
+        fprintf(stderr, "[EB] status item checked: inbar=%d slot=%.0f,%.0f %.0fx%.0f\n", inBar, f.origin.x,
+                f.origin.y, f.size.width, f.size.height);
+    if (inBar)
+        return;
+
+    // Out of the bar but still ours. Resizing the item is how the bar is asked to lay it out again, and it
+    // costs the icon nothing: same object, same menu, same everything. Only if the bar declines does this
+    // go near removing anything.
+    item.length = NSSquareStatusItemLength;
+    [item.button setNeedsDisplay:YES];
+    if (EBTraceOn())
+        fprintf(stderr, "[EB] status item: out of the bar, nudged rather than replaced\n");
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (self.goingToSleep || EBStatusItemInMenuBar(self.statusItem))
+            return;
+        if (EBTraceOn())
+            fprintf(stderr, "[EB] status item: the nudge did not take, rebuilding it\n");
+        if (self.statusItem) {
+            [[NSStatusBar systemStatusBar] removeStatusItem:self.statusItem];
+            self.statusItem = nil;
+        }
+        [self installStatusItem];
+        [self refreshStatusItem];
+        if (EBTraceOn()) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                NSRect after = [self.statusItem.button.window convertRectToScreen:self.statusItem.button.frame];
+                fprintf(stderr, "[EB] status item rebuilt: inbar=%d slot=%.0f,%.0f %.0fx%.0f\n",
+                        EBStatusItemInMenuBar(self.statusItem), after.origin.x, after.origin.y, after.size.width,
+                        after.size.height);
+            });
+        }
+    });
 }
 
 - (void)presentDemoShortBreak {

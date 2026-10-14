@@ -178,26 +178,31 @@ if wait_for "$LOG" 'dim layer:' 90; then
           red "  FAIL  focus was never returned"
           FAIL=$((FAIL + 1))
       fi
-      # The status item is dropped when the app returns to being background-only after a break, and
-      # nothing else here would notice: the other check ran before a break had ever started, which is
-      # exactly why it sat there green while the icon was already gone.
+      # The status item must SURVIVE the break, and the earlier check never found out: it ran before a
+      # break had ever started, which is why it stayed green through a missing icon.
       #
-      # The frame is not asserted on. A locked screen does not lay the menu bar out at all, so the item's
-      # window reports a position that says nothing about whether the user can see the icon, and this run
-      # fails on a locked machine for a reason that has nothing to do with the app. What is asserted is
-      # that the item was rebuilt once the app was back in the background and that it came back visible,
-      # which is exactly the state that used to be lost.
+      # Two things are asserted, and the second is the regression. The item has to be in the bar once the
+      # break is over. And the app must never destroy an item it has already found in the bar: a version
+      # that removed and rebuilt the item on every activation policy transition threw the icon away twice
+      # per break, and every other check here stayed green while it did, because isVisible answers yes for
+      # an item the bar never placed.
       for _ in $(seq 1 12); do
-          grep -q 'status item settled:' "$LOG" && break
+          grep -q 'status item checked:' "$LOG" && break
           sleep 1
       done
-      if settled=$(grep 'status item settled:' "$LOG" | tail -1) && grep -q 'visible=1' <<<"$settled"; then
-          green "  PASS  menu bar item is back after the break"
+      last=$(grep 'status item checked:' "$LOG" | tail -1)
+      # A rebuild after the item was found in the bar is the bug; a rebuild before that is the repair.
+      after=$(awk '/status item checked: inbar=1/ { seen = 1 } /the nudge did not take/ && seen { c++ } END { print c + 0 }' "$LOG")
+      if grep -q 'inbar=1' <<<"$last" && [ "$after" -eq 0 ]; then
+          green "  PASS  menu bar item is in the bar and was never rebuilt under it"
           PASS=$((PASS + 1))
-      else
-          red "  FAIL  menu bar item did not come back after the break"
+      elif [ "$after" -ne 0 ]; then
+          red "  FAIL  the status item was rebuilt $after time(s) while it was in the bar"
           FAIL=$((FAIL + 1))
-      fi
+      else
+            red "  FAIL  the status item was never built, or was not in the bar after the break"
+            FAIL=$((FAIL + 1))
+        fi
 else
     red "  FAIL  the short break never appeared"
     FAIL=$((FAIL + 3))
