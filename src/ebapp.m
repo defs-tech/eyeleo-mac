@@ -894,6 +894,20 @@ static const long EBTeaEventDeferCapSec = 150;
     }
     [self installStatusItem];
     [self refreshStatusItem];
+
+    // The trace installStatusItem leaves behind is fired half a second after the item is made, which is
+    // not long enough here: the status bar lays out asynchronously and this item is being rebuilt in the
+    // middle of a policy change, so that reading catches the item mid-flight and reports a frame that is
+    // not where it ends up. Reported again once it has settled, and the smoke test reads this line to
+    // tell a rebuilt item from a rebuilt object the menu bar never took back.
+    if (EBTraceOn()) {
+        NSStatusItem *item = self.statusItem;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            NSRect f = item.button.window.frame;
+            fprintf(stderr, "[EB] status item settled: visible=%d frame=%.0f,%.0f %.0fx%.0f\n",
+                    item.button.window.isVisible, f.origin.x, f.origin.y, f.size.width, f.size.height);
+        });
+    }
 }
 
 - (void)presentDemoShortBreak {

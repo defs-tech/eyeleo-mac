@@ -99,6 +99,16 @@ front=$(./build/windows 2>/dev/null | sed -n 's/^frontmost: \([^ ]*\).*/\1/p')
 if [[ "$front" == "com.apple.loginwindow" || -z "$front" ]]; then
     SCREEN_LOCKED=1
 fi
+echo "  screen locked at start: $SCREEN_LOCKED"
+
+# Asked again at the point of use rather than reused from the top of the script. The screen here locks and
+# unlocks on its own schedule, and a run that started unlocked and locked halfway through was reporting a
+# genuine focus failure caused by a lock it had decided about minutes earlier.
+screen_is_locked() {
+    local now
+    now=$(./build/windows 2>/dev/null | sed -n 's/^frontmost: \([^ ]*\).*/\1/p')
+    [[ "$now" == "com.apple.loginwindow" || -z "$now" ]]
+}
 
 echo
 echo "== menu bar item =="
@@ -152,22 +162,42 @@ if wait_for "$LOG" 'dim layer:' 90; then
         FAIL=$((FAIL + 1))
     fi
     # activation settles 400 ms after the window is ordered in, so this line is never there yet
-    if wait_for "$LOG" 'capture settled' 10; then
-        if ((SCREEN_LOCKED)); then
-            printf '  SKIP  keyboard capture (screen is locked, no foreground session)\n'
-        else
-            check "keyboard is taken" "$LOG" 'capture settled: appActive=1 key=1'
-        fi
+      if wait_for "$LOG" 'capture settled' 10; then
+          if screen_is_locked; then
+              printf '  SKIP  keyboard capture (screen is locked, no foreground session)\n'
+          else
+              check "keyboard is taken" "$LOG" 'capture settled: appActive=1 key=1'
+          fi
     else
         red "  FAIL  activation never settled"
         FAIL=$((FAIL + 1))
     fi
-    if wait_for "$LOG" 'restore focus to' 40; then
-        check "focus goes back afterwards" "$LOG" 'restore focus to ".+"'
-    else
-        red "  FAIL  focus was never returned"
-        FAIL=$((FAIL + 1))
-    fi
+      if wait_for "$LOG" 'restore focus to' 40; then
+          check "focus goes back afterwards" "$LOG" 'restore focus to ".+"'
+      else
+          red "  FAIL  focus was never returned"
+          FAIL=$((FAIL + 1))
+      fi
+      # The status item is dropped when the app returns to being background-only after a break, and
+      # nothing else here would notice: the other check ran before a break had ever started, which is
+      # exactly why it sat there green while the icon was already gone.
+      #
+      # The frame is not asserted on. A locked screen does not lay the menu bar out at all, so the item's
+      # window reports a position that says nothing about whether the user can see the icon, and this run
+      # fails on a locked machine for a reason that has nothing to do with the app. What is asserted is
+      # that the item was rebuilt once the app was back in the background and that it came back visible,
+      # which is exactly the state that used to be lost.
+      for _ in $(seq 1 12); do
+          grep -q 'status item settled:' "$LOG" && break
+          sleep 1
+      done
+      if settled=$(grep 'status item settled:' "$LOG" | tail -1) && grep -q 'visible=1' <<<"$settled"; then
+          green "  PASS  menu bar item is back after the break"
+          PASS=$((PASS + 1))
+      else
+          red "  FAIL  menu bar item did not come back after the break"
+          FAIL=$((FAIL + 1))
+      fi
 else
     red "  FAIL  the short break never appeared"
     FAIL=$((FAIL + 3))
@@ -186,11 +216,11 @@ if wait_for "$LOG" 'none -> relaxing' 90; then
     check "long break screen shown" "$LOG" 'none -> relaxing'
     check "long break dims without blurring" "$LOG" 'dim layer: .* dim=0\.78 blur=off'
     wait_for "$LOG" 'capture settled' 10
-    if ((SCREEN_LOCKED)); then
-        printf '  SKIP  keyboard capture (screen is locked, no foreground session)\n'
-    else
-        check "keyboard taken on the long break too" "$LOG" 'capture settled: appActive=1 key=1'
-    fi
+      if screen_is_locked; then
+          printf '  SKIP  keyboard capture (screen is locked, no foreground session)\n'
+      else
+          check "keyboard taken on the long break too" "$LOG" 'capture settled: appActive=1 key=1'
+      fi
 else
     red "  FAIL  the long break never started"
     FAIL=$((FAIL + 2))
