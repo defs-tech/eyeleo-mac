@@ -712,9 +712,15 @@ tools/checktea.awk    checks a tea.conf against the same rules the parser uses, 
 docs/tea.md           how to add a tea, name it, give it a picture, and read why one was refused
 tools/check_strings.m localization coverage and plural spot-checks
 tools/windows.m       lists on-screen windows (bounds only; needs no permission)
+tools/menubar-icon-count.py  counts menu bar icons in a strip screenshot, by dark pixels rather than by
+                       diffing two captures: the bar is translucent, so the background moves under it and
+                       two identical screens differ by tens of thousands of pixels
+tools/fix-menubar-registration.py  undoes the macOS 26 trap described under "Launch through open" above:
+                       drops a foreign host's claim over this bundle's menu bar item, leaving every other
+                       record alone. Needs Full Disk Access, and makes a backup before writing
 tools/smoke.sh       end-to-end check of the built app, not just the core
-tests/                513 checks over the core state machine, the overlay geometry, the settings file and
-                      the generated artwork, plus a localization coverage check over 179 keys
+tests/                594 checks over the core state machine, the overlay geometry, the settings file and
+                      the generated artwork, plus a localization coverage check over 180 keys
 ```
 
 ## Tests
@@ -725,6 +731,39 @@ and strict mode, the give-up path, restart resume, settings round-trip and clamp
 rules. `tests/ebdetect_stub.c` replaces the CoreGraphics detector so the tests run without a window
 server. `tools/smoke.sh` adds 19 end-to-end checks against the built app, so an overlay that never
 appears on screen fails the build and not just a unit.
+
+### The smoke test's menu bar check is broken, and running it costs you the menu bar
+
+Two separate faults, both known, neither fixed here because fixing the first one properly means
+changing how the whole script launches the app.
+
+**The script starts the binary directly**, `env "$@" "$BIN"`. On macOS 26 that is the launch
+described above under "Launch through `open`": the status item is registered against this shell
+and ControlCenter parks it. So every run of the suite removes the menu bar item from the
+developer's own machine, and the damage persists until the registration is repaired.
+
+**The check that should notice reads the wrong thing.** It matches
+`button=[0-9.]*,[0-9.]* [0-9]*x[1-9]` against the app's own trace. A parked item reports
+`button=0,-6 38x22`, and that pattern cannot match a negative coordinate, so the line is reported
+as `FAIL button has zero height (menu bar item would be invisible)`. The height is 22, not 0: the
+item is parked above the top of the screen, which is a different fault with a different cause and a
+different fix. The message sends the reader after the wrong problem.
+
+The check has failed on every run since it was written. `make smoke` is invoked with `|| true` in
+the release workflow, so nothing upstream ever saw it.
+
+What a fix looks like, recorded here rather than attempted: launch through `open --env` so the
+shell never owns the item, and give the app somewhere to put its trace when it is not started by
+the script — it writes to `stderr`, and under LaunchServices that goes to the system log rather
+than to the caller. Until then, expect one failure and expect to repair the menu bar afterwards:
+
+```
+killall ControlCenter && python3 tools/fix-menubar-registration.py --apply && killall cfprefsd
+```
+
+`tools/menubar-icon-count.py` is the check that does work, and it is there for this: run the
+installed app, count icons before and after, and compare the counts. Counting is what makes it
+reliable, because the bar is translucent and two captures of an unchanged screen differ widely.
 
 ## Provenance
 
