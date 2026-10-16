@@ -16,3 +16,9 @@ spike/probe.app/
 *~
 *.orig
 *.rej
+
+# Working notes from the macOS 26 menu bar investigation: the question set and the
+# replies to it. They are a record of one debugging session, not project
+# documentation, and the finding they produced is written up in README.md instead.
+questions.md
+*answer*.md

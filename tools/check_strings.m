@@ -39,6 +39,7 @@ static NSArray<NSString *> *AllKeys(void) {
         @"settings_start_at_login", @"settings_start_at_login_tooltip",
         @"information_info_1",
         @"information_author", @"information_stats", @"information_stats_fmt", @"status.error",
+        @"information_version_fmt",
         @"time.too_many_hours", @"before_pause_text", @"before_pause_refuse_button",
         @"before_pause_postpone_button", @"before_pause_accept_button", @"waiting_text",
         @"big_pause_text_1", @"big_pause_text_2", @"big_pause_text_3", @"big_pause_time_left_text",

@@ -231,6 +231,26 @@ static NSString *LocalizedListItem(NSString *keyFormat, int index) {
     info.bordered = NO;
     info.drawsBackground = NO;
 
+    // The version is read from the bundle rather than kept here as a literal, so Info.plist stays the
+    // only place it is written. The Windows port has it duplicated across three files and that has
+    // already cost mismatched builds; a fourth copy is what this avoids.
+    //
+    // A binary run outside its bundle during debugging has no Info.plist to read, so the line is
+    // left out entirely rather than showing a placeholder.
+    NSString *version = [NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"] description];
+    NSTextField *versionLabel = nil;
+    if (version.length) {
+        versionLabel = [[NSTextField alloc] initWithFrame:NSZeroRect];
+        versionLabel.stringValue =
+            [NSString stringWithFormat:NSLocalizedString(@"information_version_fmt", @"version line"), version];
+        versionLabel.font = [NSFont systemFontOfSize:12];
+        versionLabel.editable = NO;
+        versionLabel.selectable = NO;
+        versionLabel.bezeled = NO;
+        versionLabel.bordered = NO;
+        versionLabel.drawsBackground = NO;
+    }
+
     NSString *statsText = [NSString stringWithFormat:NSLocalizedString(@"information_stats_fmt", @"stats"),
                                                     @(stats.longBreakCount), @(stats.shortBreakCount),
                                                     @(stats.earlySkipCount + stats.lateSkipCount),
@@ -269,7 +289,13 @@ static NSString *LocalizedListItem(NSString *keyFormat, int index) {
     license.bordered = NO;
     license.drawsBackground = NO;
 
-    NSStackView *infoStack = [NSStackView stackViewWithViews:@[ info, statsLabel, author, license ]];
+    // Assembled rather than written as one literal because the version line is conditional.
+    NSMutableArray *infoViews = [NSMutableArray arrayWithObject:info];
+    if (versionLabel)
+        [infoViews addObject:versionLabel];
+    [infoViews addObjectsFromArray:@[ statsLabel, author, license ]];
+
+    NSStackView *infoStack = [NSStackView stackViewWithViews:infoViews];
     infoStack.orientation = NSUserInterfaceLayoutOrientationVertical;
     infoStack.alignment = NSLayoutAttributeLeading;
     infoStack.spacing = 12;

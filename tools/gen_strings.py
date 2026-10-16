@@ -198,6 +198,11 @@ EXTRA = {
         "settings_start_at_login_tooltip": "Let macOS start EyeLeo when you log in",
         "information_stats": "Statistics",
         "information_stats_fmt": "Long breaks: %@\nShort breaks: %@\nSkipped long breaks: %@\nPostponed: %@\nRefused: %@",
+        # The version line is a port addition, and it belongs here for the same reason as the
+        # licence below: the original langpack carries no such text, so with no entry of our own
+        # the next regeneration has no source for the key and refuses to write the file at all.
+        # The number is filled in from the bundle at runtime; only this wording is ours.
+        "information_version_fmt": "Version %@",
         # The original langpack carries this key with empty text, so the generator has it here rather than
         # taking it from there. Without this line the licence text has to be typed in by hand after every
         # rebuild, and the next rebuild takes it away again.
@@ -254,6 +259,7 @@ EXTRA = {
         "settings_start_at_login_tooltip": "Разрешить macOS запускать EyeLeo при входе в систему",
         "information_stats": "Статистика",
         "information_stats_fmt": "Больших перерывов: %@\nКоротких перерывов: %@\nПропущено больших: %@\nОтложено: %@\nОтказов: %@",
+        "information_version_fmt": "Версия %@",
         "information_license": "Лицензия CC BY-NC 4.0: можно использовать и изменять с указанием авторства, только некоммерчески.",
         "time.too_many_hours": "больше часа",
         "unit.minute.one": "минута",

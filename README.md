@@ -385,6 +385,10 @@ not involved any more: a key there cannot override the line, and `tea_name_*` is
 the 71x44 pt corner of the bubble at 2x. Anything failing that is refused and the slot is left empty, with
 the reason in the log. A tea with no picture at all still brews; it just has no glass.
 
+Changing a tea's name, its picture, how many steeps it has and how long each one runs is one line of
+`tea.conf` plus one PNG. The step-by-step for that, every rule with the reasoning behind it, and what to do
+when a line gets refused, are in [docs/tea.md](docs/tea.md).
+
 Steeping is deliberately manual. An automatic timer cannot know when you have actually poured the water
 off the leaves, so a countdown would be wrong for anyone who looks away, and the fix for that is a
 button rather than a smarter guess. The menu item counts down to the next steep, the bubble hides once a
@@ -509,6 +513,29 @@ EYELEO_DEBUG=1 EYELEO_TEST_WATER_SEC=6 ./build/EyeLeo.app/Contents/MacOS/EyeLeo
 ## Debugging and test hooks
 
 All off unless the environment variable is set. `EYELEO_DEBUG` also traces every state transition.
+
+### Launch through `open`, never through the binary
+
+```
+open --env EYELEO_DEBUG=1 /Applications/EyeLeo.app
+```
+
+Running `Contents/MacOS/EyeLeo` straight from a shell is the trap that cost this app its menu bar icon.
+On macOS 26 a status item is registered against the host that owns the launch, so a binary started from a
+terminal is registered as belonging to **that terminal** rather than to the app. ControlCenter then decides
+visibility using the terminal's own permission, and a terminal with "Allow in the Menu Bar" switched off
+silences every menu bar app ever launched from it. The item's own record says `isAllowed: True` and the app
+draws its icon correctly into its window; nothing reaches the screen.
+
+The damage is not per launch and it does not heal: it survives quitting, reinstalling, rebuilding the bundle,
+rebooting and restarting `ControlCenter`. It is written into
+`~/Library/Group Containers/group.com.apple.controlcenter/Library/Preferences/group.com.apple.controlcenter.plist`,
+where `trackedApplications` is a binary plist nested inside a `<data>` field, and every entry whose
+`menuItemLocations` mentions a foreign identifier is a case of this. The file is closed by TCC: `sudo` does not
+open it, only Full Disk Access for the terminal that reads it.
+
+`open` goes through LaunchServices and registers the item against the app, so the problem never appears.
+Use it for every run while debugging, including runs that only want one hook set.
 
 This is also where a tea that failed to appear gets its explanation, and it is the only place. Problems
 with `tea.conf` are reported here and nowhere else, on purpose: a refused line is a mistake in a file
